@@ -9,6 +9,7 @@ Run with:  uv run --env-file .env streamlit run src/twyd/app.py
 """
 
 import os
+import re
 from pathlib import Path
 
 import streamlit as st
@@ -28,12 +29,31 @@ EXAMPLES = [
 ]
 
 
+# st.cache_resource is shared across ALL sessions, not one per session.
+# That matters because run_query's timeout calls conn.interrupt(): on a shared
+# connection, one slow query being cancelled would cancel a concurrent one in
+# another browser tab. Each run therefore gets its own cursor, which is a
+# separate connection to the same database - it inherits read_only and
+# enable_external_access, and interrupting it affects nothing else (verified).
 @st.cache_resource
-def _conn():
-    """One read-only connection per session. cache_resource is Streamlit's own
-    mechanism for this, so we are not inventing a connection pool.
+def _database():
+    """The one process-wide connection. Shared by every session; never queried
+    directly - callers take a cursor from it.
     """
     return connect(DB_PATH)
+
+
+def _plain(text: str) -> str:
+    r"""Escape the Markdown that turns text into links and images.
+
+    st.success and st.error render Markdown, and the answer can legitimately
+    quote review_comment_message - public free text that in this dataset
+    really does contain raw URLs (5,591 reviews carry `[`, `!` or `http`).
+    Rendered, that becomes a clickable link or an auto-fetched image pointing
+    wherever the review's author chose. HTML is already inert here, since
+    Streamlit escapes it unless unsafe_allow_html is set.
+    """
+    return re.sub(r"([\[\]!`])", r"\\\1", text)
 
 
 st.set_page_config(page_title="Talk with your data", page_icon="📊")
@@ -56,14 +76,14 @@ question = st.text_input(
 
 if question:
     with st.spinner("Generating SQL and running it…"):
-        result = answer_question(question, _conn())
+        result = answer_question(question, _database().cursor())
 
     if result.ok:
-        st.success(result.answer)
+        st.success(_plain(result.answer))
     else:
         # The stage is the useful part: it says whether the model wrote
         # something unsafe, something broken, or something too slow.
-        st.error(f"Failed at the {result.stage} stage: {result.error}")
+        st.error(f"Failed at the {result.stage} stage: {_plain(result.error)}")
 
     if result.sql:
         with st.expander("SQL", expanded=not result.ok):

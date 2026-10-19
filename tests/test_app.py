@@ -39,3 +39,20 @@ def test_a_missing_database_is_reported_not_crashed(monkeypatch, tmp_path):
     at.run()
     assert not at.exception
     assert "No database" in at.error[0].value
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("![](http://evil/x)", r"\!\[\](http://evil/x)"),
+        ("see [link](http://evil) now", r"see \[link\](http://evil) now"),
+        ("There are 96,096 customers (distinct people).", "There are 96,096 customers (distinct people)."),
+    ],
+)
+def test_markdown_that_would_render_a_link_or_image_is_escaped(raw, expected):
+    """Answers can quote review_comment_message, which is public free text and
+    in this dataset really does contain raw URLs. st.success renders Markdown.
+    """
+    from twyd.app import _plain
+
+    assert _plain(raw) == expected

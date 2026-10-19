@@ -325,3 +325,33 @@ a test run rather than during a live demo.
 
 **Still true:** no business logic in the UI. If something in `app.py` starts
 looking like a decision, it belongs in `pipeline.py`.
+
+### Post-review addendum: two findings in the UI
+
+**1. `st.cache_resource` is not per session.** My docstring said "one
+read-only connection per session"; it is one connection shared by every
+session. That matters because `run_query`'s timeout calls
+`conn.interrupt()` - on a shared connection, cancelling one slow query would
+cancel a concurrent one in another browser tab. Each run now takes
+`_database().cursor()`, which is a separate connection to the same database.
+Verified that a cursor still inherits `read_only` and
+`enable_external_access` (a `CREATE TABLE` and a `read_csv('/etc/passwd')`
+both still fail on it) and that interrupting one cursor leaves another
+working.
+
+**2. `st.success` renders Markdown, and the answer can quote reviews.**
+`review_comment_message` is public free text. I checked before believing the
+finding: 5,591 reviews contain `[`, `!` or `http`, and real ones carry raw
+URLs like `http://prntscr.com/jkx7hr`. So "what do customers complain about?"
+can route a stranger's text through the model into a Markdown renderer, where
+`![](http://...)` becomes an auto-fetched image and `[text](http://...)` a
+clickable link - from data, not from me. `_plain()` escapes `[ ] ! \``
+before display. HTML was already inert, since Streamlit escapes it unless
+`unsafe_allow_html` is set.
+
+**Pattern worth noting across all three security reviews so far:** every
+finding was about a boundary I had not thought of rather than a rule I had
+broken. Milestone 1: read-only protects the database, not the host.
+Milestone 2: a denylist of function names cannot see `FROM 'secrets.csv'`.
+Milestone 4: the data itself is untrusted input to the *renderer*, not just to
+SQL. Each time the fix was two lines and the blind spot was conceptual.
