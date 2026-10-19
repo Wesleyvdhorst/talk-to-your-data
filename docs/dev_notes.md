@@ -288,3 +288,40 @@ tuning before the eval set exists is how you leak the eval into the prompt.
 trap) did not happen, and the failure I got was in the *explanation* of a
 correct query. Grounding is not only about numbers; a true number with a wrong
 account of where it came from is still a wrong answer to a person who trusts it.
+
+## Milestone 4 — the Streamlit layer
+
+**Attempted:** a UI thin enough that nothing in it decides anything.
+`app.py` collects a question, calls `answer_question`, and renders the answer,
+the SQL and the result table. The failure path shows which stage broke
+(`generate` / `validate` / `execute`), because that is the field worth reading
+when something goes wrong.
+
+**Decisions I made:** `@st.cache_resource` for the connection rather than a
+module global of my own - it is Streamlit's own mechanism for a per-session
+resource, so there is no connection pool to explain. The result table is built
+as a `{column: values}` dict, which renders with real headers and keeps pandas
+out of the dependency list.
+
+**What failed, and it is the useful part of this milestone.** My first UI test
+monkeypatched `twyd.app.DB_PATH` to the fixture database. It passed - and it
+was lying. `AppTest` re-executes `app.py`, so the module-level constant is
+rebuilt from the source and my patch never applied; the test was quietly
+running against the real 53 MB database. A passing test that does not test
+what it says is worse than no test, and the only reason I caught it was that
+the second test (missing database) failed for the same cause and made the
+mechanism visible.
+
+Fix: `DB_PATH = Path(os.environ.get("TWYD_DB", "db/olist.duckdb"))`, which the
+tests set before the app runs. The fixture-backed test now finishes in ~1s
+instead of ~10s, which is itself the evidence it changed database.
+
+**New tools learned:** `streamlit.testing.v1.AppTest` runs the app headlessly
+and lets you assert on rendered elements (`app.success`, `app.code`,
+`app.dataframe`, `app.exception`). Two offline tests cover rendering with no
+model call, and one integration test types a real question and checks the
+answer, the SQL and the table all arrive - so a broken widget call shows up in
+a test run rather than during a live demo.
+
+**Still true:** no business logic in the UI. If something in `app.py` starts
+looking like a decision, it belongs in `pipeline.py`.

@@ -10,7 +10,7 @@ The point of this project is **process, learning and conceptual ownership** as m
 
 # Current status
 
-**Iteration 1, milestone 3 (LLM Integration & End-to-End Pipeline): complete.** Next is milestone 4 (Minimal Application Interface). Update this line whenever a milestone is finished.
+**Iteration 1, milestone 4 (Minimal Application Interface): complete.** Next is milestone 5 (Evaluation & Baseline Stabilization). Update this line whenever a milestone is finished.
 
 Do not implement anything from a later step or iteration unless I ask for it explicitly.
 
@@ -121,6 +121,7 @@ uv sync                                  # install dependencies
 uv run pytest                            # unit tests: offline, fixture data, fast
 uv run pytest -m integration             # integration tests: needs the real CSVs in data/
 uv run --env-file .env pytest -m integration   # ... plus real model calls (~$0.01 each)
+uv run --env-file .env streamlit run src/twyd/app.py   # the app (TWYD_DB overrides the db path)
 uv run python -c "from pathlib import Path; from twyd.ingest import ingest; print(ingest(Path('data'), Path('db/olist.duckdb')))"
 ```
 
