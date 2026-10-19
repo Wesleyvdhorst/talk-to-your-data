@@ -486,3 +486,56 @@ written the first one.
 **Not fixed, on purpose.** The prompt stays as it is for now. The eval set
 exists to measure iteration 2 against this baseline, and tuning the prompt in
 the same breath as writing the eval would leave nothing to compare to.
+
+## Milestone 7 — classification before SQL
+
+**Attempted:** give the pipeline a way to decline. Two baseline defects had
+one cause: when the only available action is to generate SQL, every input gets
+SQL - including `asdfgh`, which came back as
+`SELECT 'your question looks like random keystrokes' AS message`.
+
+**The decision I made, and why it is not the obvious one:** the classifier is
+TypeSafe's Jev, not a third Claude call. Three labels, no generation and a
+calibrated confidence per label is the shape of a zero-shot decision model
+rather than of a chat model. $0.042/MTok on input with free output makes it
+roughly a hundredth of a Sonnet call, but at one call per question the money
+is not the argument - the argument is that `AMBIGUOUS` is better expressed as
+low confidence in a label than as a label a chat model elects to apply to
+itself. Claude flagged the honest cost (a second provider, a second key, a
+second failure mode, calibration not independently verified) and I took the
+tradeoff anyway, with the escape hatch that `classify()` is one module behind
+one contract.
+
+**A third outcome, which I had not planned for.** `Answer` held either an
+answer or an error, and a decline is neither: the pipeline understood the
+question well enough to refuse it. Adding `message`/`declined` alongside
+`error`/`ok` was the part of this milestone that actually changed the design,
+and the app now renders three states - a decline shown through `st.error`
+would read as a bug in the app rather than as a property of the question.
+
+**What failed, and it was my prompt again.** My first criteria labelled "how
+many orders were placed in 2030?" `UNSUPPORTED` at 0.98 confidence. That is
+eval question 12, the case where an empty result is the correct answer. My
+`UNSUPPORTED` text said "any period outside September 2016 to October 2018",
+which beat the more general "an answer of zero still belongs in ANSWERABLE" -
+two clauses in conflict, and the specific one won. The model was right about
+my wording. Same lesson as milestone 6: the defect was in what I wrote, and
+only running the real thing showed it.
+
+**Evidence against a knob I was tempted by.** Confidence is recorded but does
+not affect routing. After the criteria fix, the out-of-window questions land
+at 0.46-0.55 while the clear ones sit at 0.85-1.00 - so a sensible-looking
+0.7 threshold would have routed exactly the empty-result question to
+"ambiguous, please rephrase". Worth presenting: the calibration is informative
+*and* acting on it would have made the system worse.
+
+**Small thing learned about pinning.** `jev-latest` is an alias and the models
+endpoint publishes no concrete version, so "pin the model id" could not be
+done as planned. The version that answered (`jev-1.13.0` today) is recorded on
+every classification instead, so a recorded run can still say what labelled
+it.
+
+**New technique:** the Jev stub in `conftest.py` builds the SDK's own
+`SystemOneResponse`/`ChoiceAnswer` types instead of duck-typing them. If
+TypeSafe changes the shape of an answer, our offline tests fail rather than
+production.
