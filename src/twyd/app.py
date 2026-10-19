@@ -9,7 +9,6 @@ Run with:  uv run --env-file .env streamlit run src/twyd/app.py
 """
 
 import os
-import re
 from pathlib import Path
 
 import streamlit as st
@@ -43,39 +42,6 @@ def _database():
     return connect(DB_PATH)
 
 
-# Streamlit renders Markdown with GFM autolinking (its bundle carries
-# autolinkProtocol and autolinkEmail), so a bare http:// URL becomes a link
-# with no syntax at all. U+200B after the scheme stops the linkifier while
-# staying invisible in the text.
-_ZWSP = "\u200b"
-
-
-def _plain(text: str) -> str:
-    r"""Defuse the Markdown that reaches out to a URL.
-
-    st.success and st.error render Markdown, and an answer can legitimately
-    quote review_comment_message - public free text that in this dataset
-    really does contain raw URLs (5,591 reviews carry `[`, `!` or `http`;
-    some carry `http://prntscr.com/...`). Rendered, `![](...)` auto-fetches an
-    image and a bare URL becomes a clickable link, both pointing wherever the
-    review's author chose.
-
-    Escaped: the image and link syntax, and the three forms GFM autolinks
-    (scheme://, www., and email). Not escaped, on purpose: `*` and `_`
-    (emphasis is cosmetic, with no destination), `<` and `>` (Streamlit
-    escapes HTML unless unsafe_allow_html is set), and `(`, `)`, `:`
-    (escaping those mangles ordinary prose - "2.57 (per order)", "Note:" -
-    for no security gain, since neither can name a URL without the brackets
-    above).
-    """
-    text = re.sub(r"([\[\]!`])", r"\\\1", text)
-    return re.sub(
-        r"(?i)(://|\bwww\.|@(?=[\w-]+\.[a-z]))",
-        lambda m: m.group(1)[0] + _ZWSP + m.group(1)[1:],
-        text,
-    )
-
-
 st.set_page_config(page_title="Talk with your data", page_icon="📊")
 st.title("Talk with your data")
 st.caption("Ask about the Olist Brazilian e-commerce dataset. Answers come from SQL run read-only against DuckDB.")
@@ -98,12 +64,23 @@ if question:
     with st.spinner("Generating SQL and running it…"):
         result = answer_question(question, _database().cursor())
 
+    # st.text renders plain text. Everything below is either model output or a
+    # database message, and both can quote review_comment_message - public free
+    # text that in this dataset really does contain raw URLs. Rendered as
+    # Markdown, that text can fetch an image or link anywhere its author chose,
+    # and escaping it is a game of enumerating constructs: I escaped the
+    # bracket forms, missed GFM's syntax-free autolinks, fixed those, and still
+    # had a backslash bypass (\[x](url) survives any escaper that does not
+    # escape the escape first). Not rendering Markdown ends the whole class.
     if result.ok:
-        st.success(_plain(result.answer))
+        with st.container(border=True):
+            st.caption("Answer")
+            st.text(result.answer)
     else:
-        # The stage is the useful part: it says whether the model wrote
-        # something unsafe, something broken, or something too slow.
-        st.error(f"Failed at the {result.stage} stage: {_plain(result.error)}")
+        # The stage is our own string and says what went wrong; the detail
+        # below it is untrusted, so it stays plain.
+        st.error(f"Failed at the {result.stage} stage.")
+        st.text(result.error)
 
     if result.sql:
         with st.expander("SQL", expanded=not result.ok):

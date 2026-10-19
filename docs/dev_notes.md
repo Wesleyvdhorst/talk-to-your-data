@@ -390,3 +390,38 @@ limiting: one local user cannot outspend themselves, and that is marked with a
 the SQL at all. It was about where the process listens. I had reasoned
 carefully about untrusted SQL, untrusted review text and untrusted model
 output, and never once asked which network interface the demo server was on.
+
+A third review found the escaper bypassable again, and this time the right
+response was to delete it.
+
+The bypass: `\[x](http://evil)`. My escaper turned that into
+`\\[x\\](http://evil)`, and CommonMark reads `\\` as a literal backslash -
+after which `[x](http://evil)` is a live link. Any escaper that does not
+escape the escape character first has this hole. That was the third round on
+the same three lines: brackets, then GFM's syntax-free autolinks, then the
+backslash.
+
+**I had been writing a denylist of Markdown constructs** - which is precisely
+the mistake milestone 2 taught me to stop making, in a different costume. So
+the answer and the error detail now go through `st.text`, which renders no
+Markdown at all. `_plain()` is gone, the `re` import with it, and with them
+the whole class: no bracket syntax, no autolinks, no protocol-relative `//`,
+no `<url>`, no backslash differential, and nothing new to patch when
+Streamlit's renderer gains a feature.
+
+What it cost: the green success box. The answer sits in a bordered container
+with a caption instead. Given that the alternative was a permanent escaping
+treadmill against a renderer I do not control, that is a cheap trade.
+
+The test changed shape too. Instead of asserting what `_plain()` does to
+twelve inputs, one test asserts the property: `app.py` contains no
+`st.success(`, `st.markdown(` or `st.write(`, and the answer and error go to
+`st.text`. A test that pins the property survives the next renderer change;
+twelve tests pinning escape sequences would not have.
+
+**The arc across four security reviews, which is the thing I would actually
+present:** read-only protects the database but not the host; a function
+denylist cannot see `FROM 'secrets.csv'`; untrusted data is input to the
+renderer, not just to SQL; and when a sanitiser needs a third patch, the
+sanitiser is the wrong design. Each fix was small. The reason each was needed
+was that my threat model was one layer narrower than the system.

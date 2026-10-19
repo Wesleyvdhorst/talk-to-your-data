@@ -113,7 +113,8 @@ def test_the_app_answers_a_question_end_to_end(monkeypatch):
     app.text_input[0].set_value("How many orders are there?").run()
 
     assert not app.exception
-    assert app.success, f"no answer rendered; errors={[e.value for e in app.error]}"
-    assert "99,441" in app.success[0].value or "99441" in app.success[0].value
+    rendered = " ".join(t.value for t in app.text)
+    assert rendered, f"no answer rendered; errors={[e.value for e in app.error]}"
+    assert "99,441" in rendered or "99441" in rendered
     assert "FROM orders" in app.code[0].value.lower() or "from orders" in app.code[0].value.lower()
     assert app.dataframe  # the result table rendered
