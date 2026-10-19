@@ -59,28 +59,28 @@ def test_every_reference_query_runs_and_returns_one_value(conn):
         assert len(result.columns) == 1, f"question {q.id} reference returns >1 column"
 
 
-def test_a_correct_answer_passes(conn):
+def test_a_correct_answer_passes(conn, jev):
     """The fixture db has 4 orders, so counting orders is the right answer."""
-    results = run_eval(conn, client=AlwaysClient("SELECT count(*) FROM orders"))
+    results = run_eval(conn, client=AlwaysClient("SELECT count(*) FROM orders"), jev=jev)
     by_id = {r.question.id: r for r in results}
     assert by_id[1].verdict == "PASS"  # question 1 asks exactly this
 
 
-def test_a_wrong_number_fails_rather_than_passing(conn):
-    results = run_eval(conn, client=AlwaysClient("SELECT 123456 AS wrong"))
+def test_a_wrong_number_fails_rather_than_passing(conn, jev):
+    results = run_eval(conn, client=AlwaysClient("SELECT 123456 AS wrong"), jev=jev)
     graded = [r for r in results if r.question.reference]
     assert all(r.verdict == "FAIL" for r in graded), [r.verdict for r in graded]
 
 
-def test_unsafe_sql_counts_as_an_error_not_a_pass(conn):
-    results = run_eval(conn, client=AlwaysClient("DROP TABLE orders"))
+def test_unsafe_sql_counts_as_an_error_not_a_pass(conn, jev):
+    results = run_eval(conn, client=AlwaysClient("DROP TABLE orders"), jev=jev)
     graded = [r for r in results if r.question.reference]
     assert all(r.verdict == "ERROR" for r in graded)
     assert all(r.answer.stage == "validate" for r in graded)
 
 
-def test_record_only_questions_are_never_scored(conn):
-    results = run_eval(conn, client=AlwaysClient("SELECT 1"))
+def test_record_only_questions_are_never_scored(conn, jev):
+    results = run_eval(conn, client=AlwaysClient("SELECT 1"), jev=jev)
     record = [r for r in results if r.question.reference is None]
     assert len(record) == 4
     assert all(r.verdict == "RECORD" for r in record)
@@ -103,8 +103,8 @@ def test_the_comparison_is_tolerant_of_floats_but_not_of_wrong(actual, expected,
     assert _close(actual, expected) is same
 
 
-def test_the_report_names_every_question(conn):
-    results = run_eval(conn, client=AlwaysClient("SELECT count(*) FROM orders"))
+def test_the_report_names_every_question(conn, jev):
+    results = run_eval(conn, client=AlwaysClient("SELECT count(*) FROM orders"), jev=jev)
     report = as_markdown(results)
     for q in QUESTIONS:
         assert q.question in report

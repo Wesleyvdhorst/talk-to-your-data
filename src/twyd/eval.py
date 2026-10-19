@@ -130,8 +130,13 @@ def _first_value(result) -> Any | None:
     return result.rows[0][0]
 
 
-def run_eval(conn, client: Any | None = None) -> list[Result]:
-    """Run every question. Each one costs about $0.01."""
+def run_eval(conn, client: Any | None = None, jev: Any | None = None) -> list[Result]:
+    """Run every question. Each one costs about $0.01.
+
+    Grading the classification itself, and the labels each question should get,
+    is milestone 9's work; `jev` is plumbed through now so the runner and its
+    offline tests can pass a stub classifier.
+    """
     results = []
     for question in QUESTIONS:
         expected = (
@@ -140,7 +145,7 @@ def run_eval(conn, client: Any | None = None) -> list[Result]:
             else None
         )
         started = time.monotonic()
-        answer = answer_question(question.question, conn, client=client)
+        answer = answer_question(question.question, conn, client=client, jev=jev)
         seconds = time.monotonic() - started
         results.append(
             Result(
