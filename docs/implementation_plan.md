@@ -175,7 +175,11 @@ A tested and explainable baseline product with documented limitations and eviden
 
 Possible scope, subject to the Milestone 5 results:
 
-- Classify questions as `ANSWERABLE`, `AMBIGUOUS`, or `UNSUPPORTED`.
+- Classify questions as `ANSWERABLE`, `AMBIGUOUS`, or `UNSUPPORTED`, using
+  TypeSafe's Jev - a zero-shot decision model, which is the shape of this
+  task (three labels, a calibrated confidence, no generation) and far
+  cheaper per call than a third Claude call. Decided; the rest of this
+  section is re-cut when the iteration closes.
 - Request clarification for genuinely ambiguous questions rather than guessing.
 - **Support follow-up questions.** A question may refer to the previous one
   rather than restate it: "and for late deliveries?", "break that down by

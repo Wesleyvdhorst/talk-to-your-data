@@ -99,3 +99,14 @@ def test_an_empty_question_never_reaches_the_model(conn, question):
     assert not result.ok
     assert result.stage == "generate"
     assert client.call_count == 0  # deterministic check, no tokens spent
+
+
+def test_the_answer_call_receives_the_same_schema_as_the_sql_call(conn):
+    """One context is built per question and reaches both calls."""
+    client = ScriptedClient("SELECT count(*) AS n FROM orders", "There are 4 orders.")
+    answer_question("how many orders?", conn, client=client)
+
+    sql_call, answer_call = client.messages.calls
+    assert "TABLE customers" in sql_call["system"]
+    assert "TABLE customers" in answer_call["messages"][0]["content"]
+    assert "RESULT: 1 row, 1 column (n), complete" in answer_call["messages"][0]["content"]

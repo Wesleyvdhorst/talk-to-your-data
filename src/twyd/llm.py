@@ -12,9 +12,12 @@ them is a decision worth defending rather than a knob to twiddle:
 - No temperature. Sonnet 5.5 rejects non-default sampling values with a 400,
   so the usual `temperature=0` for text-to-SQL is not available. Determinism
   comes from the output schema and a narrow prompt instead.
-- Thinking is left adaptive (the parameter is omitted). It cannot be disabled
-  on this model; effort is the only control, and its default of `high` is more
-  than either of these calls needs.
+- Thinking is left adaptive (the parameter is omitted). Effort is the control;
+  its default of `high` is more than either of these calls needs. It CAN be
+  turned off on this model - `thinking={"type": "between_tools"}`, accepted
+  only at effort `high` or below and with no other field alongside it - which
+  an earlier version of this comment denied. Not used yet: whether it changes
+  either call's output is a measurement for the next eval run, not a guess.
 - Structured output rather than a forced tool call: this model rejects
   tool_choice "any"/"tool" with a 400, and assistant prefill too, so the two
   usual ways to coerce bare SQL out of a model are both gone.
@@ -67,6 +70,15 @@ question. Two or three sentences, no preamble, no markdown headings.
 
 - Use only numbers that appear in the result. Never estimate, extrapolate or
   add context the result does not contain.
+- Every claim ABOUT the result - how many rows it has, which columns it has,
+  whether it is complete - must repeat the RESULT line. Do not count the rows
+  yourself and do not reason about what is missing from them.
+- Mention the shape only when it matters to the answer: many rows, no rows, or
+  a truncated result. For a single value, give the value and stop; do not
+  recite the RESULT line back.
+- Use the schema only to say what a column means. It carries no numbers about
+  this result. If it does not define a column, describe the column by the name
+  the query gave it rather than guessing what it identifies.
 - If the result is empty, say that nothing matched, and do not guess why.
 - If the result was truncated, say the answer covers the rows shown.
 - Mention a caveat only when the SQL makes one real: a filter that excludes
@@ -112,18 +124,34 @@ def generate_answer(
     columns: list[str],
     rows: list[tuple[Any, ...]],
     truncated: bool = False,
+    schema_context: str = "",
     client: _Client | None = None,
 ) -> str:
     """Turn a result into prose. Takes the result's parts, not a QueryResult,
     so this module stays independent of the database layer.
+
+    The RESULT line states the shape of the result as a fact - row count,
+    column names, completeness - because the baseline showed the model will
+    otherwise describe a 20-row result as 19 rows. Counting rows is Python's
+    job; the model is only allowed to repeat the count.
+
+    schema_context is the same string the SQL call received. It is here so the
+    model can say what a column means instead of inferring it from its name -
+    the other half of the same defect, where customer_unique_id was explained
+    as "distinct customer IDs".
     """
     client = client or anthropic.Anthropic()
     result = {"columns": columns, "rows": [list(row) for row in rows]}
     content = (
         f"Question: {question}\n\nSQL:\n{sql}\n\n"
-        f"Result ({len(rows)} rows{', truncated' if truncated else ''}):\n"
-        f"{json.dumps(result, default=str)}"
+        f"RESULT: {len(rows)} row{'' if len(rows) == 1 else 's'}, "
+        f"{len(columns)} column{'' if len(columns) == 1 else 's'} "
+        f"({', '.join(columns)}), "
+        f"{'truncated at the row cap - more rows matched' if truncated else 'complete'}"
+        f"\n{json.dumps(result, default=str)}"
     )
+    if schema_context:
+        content += f"\n\nSchema (what the columns mean; no numbers about this result):\n{schema_context}"
     response = client.messages.create(
         model=MODEL,
         max_tokens=MAX_TOKENS,
