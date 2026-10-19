@@ -1,0 +1,6 @@
+{
+  "enabledPlugins": {
+    "security-guidance@claude-plugins-official": true,
+    "feature-dev@claude-plugins-official": true
+  }
+}
