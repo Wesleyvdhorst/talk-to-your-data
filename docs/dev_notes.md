@@ -486,3 +486,37 @@ written the first one.
 **Not fixed, on purpose.** The prompt stays as it is for now. The eval set
 exists to measure iteration 2 against this baseline, and tuning the prompt in
 the same breath as writing the eval would leave nothing to compare to.
+
+## Milestone 6 — grounding statements, not just values
+
+**Attempted:** fix the first baseline defect - the answer prompt grounded
+numbers but not claims *about* the result.
+
+**The insight I had already written down and had not acted on:** grounding a
+value and grounding a *description* of a value are different constraints, and
+I had only written the first. Both recorded defects (the fabricated "19 of 20
+products", `customer_unique_id` as "distinct customer IDs") fall out of that
+one gap.
+
+**Decision I made:** state the result's shape as a *fact* rather than instruct
+the model to be careful. Counting rows is `len(rows)`; the model is only
+allowed to repeat the count. Same principle as milestone 2's "deterministic
+before LLM", applied to the answer side for the first time.
+
+**Claude's suggestion I accepted:** pass the existing schema context to the
+answer call as well, rather than writing a second column-description. ~1,070
+tokens, ~$0.002 a question, and it fixes the column-meaning half of the defect
+without a new source of truth to keep in sync.
+
+**What failed:** my first prompt rule overcorrected. Every single-value answer
+ended with "The result is 1 row, 1 column (customer_count), complete."
+Grounded and useless. Added a second rule: mention the shape only when it
+bears on the answer. Worth presenting as the general shape of prompt work - a
+constraint that fixes a defect usually buys a new one, and you only see it by
+running the real thing rather than the test.
+
+**New thing learned:** the claim in my own `llm.py` docstring that thinking
+cannot be disabled on this model was wrong - `thinking={"type":
+"between_tools"}` does it, at effort `high` or below. I had carried that note
+from memory instead of re-reading the API docs, which is exactly what
+`CLAUDE.md` tells me not to do.
