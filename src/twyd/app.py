@@ -43,17 +43,37 @@ def _database():
     return connect(DB_PATH)
 
 
-def _plain(text: str) -> str:
-    r"""Escape the Markdown that turns text into links and images.
+# Streamlit renders Markdown with GFM autolinking (its bundle carries
+# autolinkProtocol and autolinkEmail), so a bare http:// URL becomes a link
+# with no syntax at all. U+200B after the scheme stops the linkifier while
+# staying invisible in the text.
+_ZWSP = "\u200b"
 
-    st.success and st.error render Markdown, and the answer can legitimately
+
+def _plain(text: str) -> str:
+    r"""Defuse the Markdown that reaches out to a URL.
+
+    st.success and st.error render Markdown, and an answer can legitimately
     quote review_comment_message - public free text that in this dataset
-    really does contain raw URLs (5,591 reviews carry `[`, `!` or `http`).
-    Rendered, that becomes a clickable link or an auto-fetched image pointing
-    wherever the review's author chose. HTML is already inert here, since
-    Streamlit escapes it unless unsafe_allow_html is set.
+    really does contain raw URLs (5,591 reviews carry `[`, `!` or `http`;
+    some carry `http://prntscr.com/...`). Rendered, `![](...)` auto-fetches an
+    image and a bare URL becomes a clickable link, both pointing wherever the
+    review's author chose.
+
+    Escaped: the image and link syntax, and the three forms GFM autolinks
+    (scheme://, www., and email). Not escaped, on purpose: `*` and `_`
+    (emphasis is cosmetic, with no destination), `<` and `>` (Streamlit
+    escapes HTML unless unsafe_allow_html is set), and `(`, `)`, `:`
+    (escaping those mangles ordinary prose - "2.57 (per order)", "Note:" -
+    for no security gain, since neither can name a URL without the brackets
+    above).
     """
-    return re.sub(r"([\[\]!`])", r"\\\1", text)
+    text = re.sub(r"([\[\]!`])", r"\\\1", text)
+    return re.sub(
+        r"(?i)(://|\bwww\.|@(?=[\w-]+\.[a-z]))",
+        lambda m: m.group(1)[0] + _ZWSP + m.group(1)[1:],
+        text,
+    )
 
 
 st.set_page_config(page_title="Talk with your data", page_icon="📊")

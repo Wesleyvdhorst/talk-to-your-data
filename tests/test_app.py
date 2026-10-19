@@ -41,17 +41,31 @@ def test_a_missing_database_is_reported_not_crashed(monkeypatch, tmp_path):
     assert "No database" in at.error[0].value
 
 
+ZWSP = "\u200b"
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ("![](http://evil/x)", r"\!\[\](http://evil/x)"),
-        ("see [link](http://evil) now", r"see \[link\](http://evil) now"),
-        ("There are 96,096 customers (distinct people).", "There are 96,096 customers (distinct people)."),
+        # Explicit image and link syntax.
+        ("![](http://evil/x)", rf"\!\[\](http:{ZWSP}//evil/x)"),
+        ("see [link](http://evil) now", rf"see \[link\](http:{ZWSP}//evil) now"),
+        # GFM autolinks all three of these with no syntax at all.
+        ("see http://evil/x now", f"see http:{ZWSP}//evil/x now"),
+        ("visit www.evil.com", f"visit w{ZWSP}ww.evil.com"),
+        ("mail me at a@b.com", f"mail me at a@{ZWSP}b.com"),
+        # Ordinary prose must survive untouched, or the fix is worse than the bug.
+        (
+            "There are 96,096 customers (distinct people). Note: averaged per order.",
+            "There are 96,096 customers (distinct people). Note: averaged per order.",
+        ),
+        ("*emphasis* has no destination", "*emphasis* has no destination"),
     ],
 )
-def test_markdown_that_would_render_a_link_or_image_is_escaped(raw, expected):
+def test_text_that_would_reach_out_to_a_url_is_defused(raw, expected):
     """Answers can quote review_comment_message, which is public free text and
-    in this dataset really does contain raw URLs. st.success renders Markdown.
+    in this dataset really does contain raw URLs. st.success renders Markdown
+    with GFM autolinking, so a bare URL needs no syntax to become a link.
     """
     from twyd.app import _plain
 

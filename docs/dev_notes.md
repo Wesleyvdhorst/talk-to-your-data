@@ -355,3 +355,38 @@ broken. Milestone 1: read-only protects the database, not the host.
 Milestone 2: a denylist of function names cannot see `FROM 'secrets.csv'`.
 Milestone 4: the data itself is untrusted input to the *renderer*, not just to
 SQL. Each time the fix was two lines and the blind spot was conceptual.
+
+A second review of the same file found both of my fixes incomplete, and it was
+right twice:
+
+**The escape missed the syntax-free case.** I escaped `[`, `]`, `!` and
+backtick, which kills `![](url)` and `[text](url)`. But Streamlit's Markdown
+renderer has GFM autolinking - its bundle carries `autolinkProtocol` and
+`autolinkEmail` - so a bare `http://evil/x`, a `www.evil.com` or an
+`a@b.com` becomes a link with no Markdown syntax at all. I had closed the
+vector that needs punctuation and left the one that needs none. A U+200B after
+the scheme now breaks the linkifier while staying invisible.
+
+I did not take the rest of the reviewer's suggestion, which was to escape
+`(`, `)`, `:`, `*`, `_`, `<`, `>` as well. `<` and `>` are already inert
+(Streamlit escapes HTML unless `unsafe_allow_html` is set), `*` and `_` only
+make text italic - cosmetic, no destination - and escaping `(`, `)` and `:`
+would mangle every legitimate answer this app produces: "2.57 (per order)",
+"Note: averaged per order". A fix that makes correct output unreadable to
+close nothing is a bad trade, and the test now pins that ordinary prose
+survives.
+
+**The app was listening on every interface.** `streamlit run` binds to `*` by
+default - I confirmed it with `lsof`: `TCP *:8601 (LISTEN)`. The app holds an
+API key and has no authentication, so on office or conference wifi anyone on
+the network could have opened it and spent the key. `.streamlit/config.toml`
+now sets `address = "127.0.0.1"`, verified by `lsof` showing
+`127.0.0.1:8602` and by a request to the machine's LAN address
+(`192.168.1.190`) now failing where it would have been served. No rate
+limiting: one local user cannot outspend themselves, and that is marked with a
+`ponytail:` comment naming when it would be needed.
+
+**Worth presenting:** this is the first finding that was not about the data or
+the SQL at all. It was about where the process listens. I had reasoned
+carefully about untrusted SQL, untrusted review text and untrusted model
+output, and never once asked which network interface the demo server was on.
