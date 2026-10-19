@@ -1,0 +1,7 @@
+[server]
+# Streamlit binds to every interface by default (verified: it listened on
+# *:8601). This app holds an API key and runs no authentication, so on shared
+# wifi anyone on the network could open it and spend the key. Localhost only.
+# ponytail: no rate limiting - a single local user cannot outspend themselves.
+# Add per-session limits if this is ever served to more than one person.
+address = "127.0.0.1"

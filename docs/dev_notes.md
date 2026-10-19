@@ -288,3 +288,140 @@ tuning before the eval set exists is how you leak the eval into the prompt.
 trap) did not happen, and the failure I got was in the *explanation* of a
 correct query. Grounding is not only about numbers; a true number with a wrong
 account of where it came from is still a wrong answer to a person who trusts it.
+
+## Milestone 4 — the Streamlit layer
+
+**Attempted:** a UI thin enough that nothing in it decides anything.
+`app.py` collects a question, calls `answer_question`, and renders the answer,
+the SQL and the result table. The failure path shows which stage broke
+(`generate` / `validate` / `execute`), because that is the field worth reading
+when something goes wrong.
+
+**Decisions I made:** `@st.cache_resource` for the connection rather than a
+module global of my own - it is Streamlit's own mechanism for a per-session
+resource, so there is no connection pool to explain. The result table is built
+as a `{column: values}` dict, which renders with real headers and keeps pandas
+out of the dependency list.
+
+**What failed, and it is the useful part of this milestone.** My first UI test
+monkeypatched `twyd.app.DB_PATH` to the fixture database. It passed - and it
+was lying. `AppTest` re-executes `app.py`, so the module-level constant is
+rebuilt from the source and my patch never applied; the test was quietly
+running against the real 53 MB database. A passing test that does not test
+what it says is worse than no test, and the only reason I caught it was that
+the second test (missing database) failed for the same cause and made the
+mechanism visible.
+
+Fix: `DB_PATH = Path(os.environ.get("TWYD_DB", "db/olist.duckdb"))`, which the
+tests set before the app runs. The fixture-backed test now finishes in ~1s
+instead of ~10s, which is itself the evidence it changed database.
+
+**New tools learned:** `streamlit.testing.v1.AppTest` runs the app headlessly
+and lets you assert on rendered elements (`app.success`, `app.code`,
+`app.dataframe`, `app.exception`). Two offline tests cover rendering with no
+model call, and one integration test types a real question and checks the
+answer, the SQL and the table all arrive - so a broken widget call shows up in
+a test run rather than during a live demo.
+
+**Still true:** no business logic in the UI. If something in `app.py` starts
+looking like a decision, it belongs in `pipeline.py`.
+
+### Post-review addendum: two findings in the UI
+
+**1. `st.cache_resource` is not per session.** My docstring said "one
+read-only connection per session"; it is one connection shared by every
+session. That matters because `run_query`'s timeout calls
+`conn.interrupt()` - on a shared connection, cancelling one slow query would
+cancel a concurrent one in another browser tab. Each run now takes
+`_database().cursor()`, which is a separate connection to the same database.
+Verified that a cursor still inherits `read_only` and
+`enable_external_access` (a `CREATE TABLE` and a `read_csv('/etc/passwd')`
+both still fail on it) and that interrupting one cursor leaves another
+working.
+
+**2. `st.success` renders Markdown, and the answer can quote reviews.**
+`review_comment_message` is public free text. I checked before believing the
+finding: 5,591 reviews contain `[`, `!` or `http`, and real ones carry raw
+URLs like `http://prntscr.com/jkx7hr`. So "what do customers complain about?"
+can route a stranger's text through the model into a Markdown renderer, where
+`![](http://...)` becomes an auto-fetched image and `[text](http://...)` a
+clickable link - from data, not from me. `_plain()` escapes `[ ] ! \``
+before display. HTML was already inert, since Streamlit escapes it unless
+`unsafe_allow_html` is set.
+
+**Pattern worth noting across all three security reviews so far:** every
+finding was about a boundary I had not thought of rather than a rule I had
+broken. Milestone 1: read-only protects the database, not the host.
+Milestone 2: a denylist of function names cannot see `FROM 'secrets.csv'`.
+Milestone 4: the data itself is untrusted input to the *renderer*, not just to
+SQL. Each time the fix was two lines and the blind spot was conceptual.
+
+A second review of the same file found both of my fixes incomplete, and it was
+right twice:
+
+**The escape missed the syntax-free case.** I escaped `[`, `]`, `!` and
+backtick, which kills `![](url)` and `[text](url)`. But Streamlit's Markdown
+renderer has GFM autolinking - its bundle carries `autolinkProtocol` and
+`autolinkEmail` - so a bare `http://evil/x`, a `www.evil.com` or an
+`a@b.com` becomes a link with no Markdown syntax at all. I had closed the
+vector that needs punctuation and left the one that needs none. A U+200B after
+the scheme now breaks the linkifier while staying invisible.
+
+I did not take the rest of the reviewer's suggestion, which was to escape
+`(`, `)`, `:`, `*`, `_`, `<`, `>` as well. `<` and `>` are already inert
+(Streamlit escapes HTML unless `unsafe_allow_html` is set), `*` and `_` only
+make text italic - cosmetic, no destination - and escaping `(`, `)` and `:`
+would mangle every legitimate answer this app produces: "2.57 (per order)",
+"Note: averaged per order". A fix that makes correct output unreadable to
+close nothing is a bad trade, and the test now pins that ordinary prose
+survives.
+
+**The app was listening on every interface.** `streamlit run` binds to `*` by
+default - I confirmed it with `lsof`: `TCP *:8601 (LISTEN)`. The app holds an
+API key and has no authentication, so on office or conference wifi anyone on
+the network could have opened it and spent the key. `.streamlit/config.toml`
+now sets `address = "127.0.0.1"`, verified by `lsof` showing
+`127.0.0.1:8602` and by a request to the machine's LAN address
+(`192.168.1.190`) now failing where it would have been served. No rate
+limiting: one local user cannot outspend themselves, and that is marked with a
+`ponytail:` comment naming when it would be needed.
+
+**Worth presenting:** this is the first finding that was not about the data or
+the SQL at all. It was about where the process listens. I had reasoned
+carefully about untrusted SQL, untrusted review text and untrusted model
+output, and never once asked which network interface the demo server was on.
+
+A third review found the escaper bypassable again, and this time the right
+response was to delete it.
+
+The bypass: `\[x](http://evil)`. My escaper turned that into
+`\\[x\\](http://evil)`, and CommonMark reads `\\` as a literal backslash -
+after which `[x](http://evil)` is a live link. Any escaper that does not
+escape the escape character first has this hole. That was the third round on
+the same three lines: brackets, then GFM's syntax-free autolinks, then the
+backslash.
+
+**I had been writing a denylist of Markdown constructs** - which is precisely
+the mistake milestone 2 taught me to stop making, in a different costume. So
+the answer and the error detail now go through `st.text`, which renders no
+Markdown at all. `_plain()` is gone, the `re` import with it, and with them
+the whole class: no bracket syntax, no autolinks, no protocol-relative `//`,
+no `<url>`, no backslash differential, and nothing new to patch when
+Streamlit's renderer gains a feature.
+
+What it cost: the green success box. The answer sits in a bordered container
+with a caption instead. Given that the alternative was a permanent escaping
+treadmill against a renderer I do not control, that is a cheap trade.
+
+The test changed shape too. Instead of asserting what `_plain()` does to
+twelve inputs, one test asserts the property: `app.py` contains no
+`st.success(`, `st.markdown(` or `st.write(`, and the answer and error go to
+`st.text`. A test that pins the property survives the next renderer change;
+twelve tests pinning escape sequences would not have.
+
+**The arc across four security reviews, which is the thing I would actually
+present:** read-only protects the database but not the host; a function
+denylist cannot see `FROM 'secrets.csv'`; untrusted data is input to the
+renderer, not just to SQL; and when a sanitiser needs a third patch, the
+sanitiser is the wrong design. Each fix was small. The reason each was needed
+was that my threat model was one layer narrower than the system.

@@ -10,7 +10,7 @@ The point of this project is **process, learning and conceptual ownership** as m
 
 # Current status
 
-**Iteration 1, milestone 3 (LLM Integration & End-to-End Pipeline): complete.** Next is milestone 4 (Minimal Application Interface). Update this line whenever a milestone is finished.
+**Iteration 1, milestone 4 (Minimal Application Interface): complete.** Next is milestone 5 (Evaluation & Baseline Stabilization). Update this line whenever a milestone is finished.
 
 Do not implement anything from a later step or iteration unless I ask for it explicitly.
 
@@ -95,6 +95,13 @@ Known semantic traps, every one verified against the real data — the numbers a
 4. Implement the simplest version that meets the current step.
 5. Add or run the tests.
 6. Review the result critically. State the assumptions made, the remaining failure modes and anything still uncertain.
+7. **Close the milestone before starting the next one.** Never begin milestone
+   N+1 on the branch of milestone N. In order: finish and test N, push its
+   branch, open its PR against `develop`, get it merged, then `git fetch --all`
+   and create `milestone/N+1-<name>` from the updated `develop`. One milestone
+   per branch and per PR, so each one can be reviewed and reverted on its own.
+   If I say "go straight into the next milestone", that means do this handover
+   first, not skip it.
 
 Claude is a coding partner, not the decision maker. Challenge my choices when they look wrong. I stay the conceptual owner of the codebase.
 
@@ -121,6 +128,7 @@ uv sync                                  # install dependencies
 uv run pytest                            # unit tests: offline, fixture data, fast
 uv run pytest -m integration             # integration tests: needs the real CSVs in data/
 uv run --env-file .env pytest -m integration   # ... plus real model calls (~$0.01 each)
+uv run --env-file .env streamlit run src/twyd/app.py   # the app (TWYD_DB overrides the db path)
 uv run python -c "from pathlib import Path; from twyd.ingest import ingest; print(ingest(Path('data'), Path('db/olist.duckdb')))"
 ```
 

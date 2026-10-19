@@ -91,3 +91,30 @@ def test_the_whole_pipeline_answers_a_real_question(real_conn):
     assert result.result.row_count == 5
     assert result.answer
     assert "delivered" in result.answer.lower()
+
+
+def test_the_app_answers_a_question_end_to_end(monkeypatch):
+    """Drives the real UI: question in, answer + SQL + table out.
+
+    This is the only test that exercises app.py's render path with data, so a
+    broken st.dataframe call or expander shows up here rather than in a demo.
+    """
+    from pathlib import Path
+
+    from streamlit.testing.v1 import AppTest
+
+    if not Path(REAL_DB).is_file():
+        pytest.skip(f"{REAL_DB} not built; run ingest() first")
+
+    monkeypatch.setenv("TWYD_DB", REAL_DB)
+    app_path = Path(__file__).parent.parent / "src" / "twyd" / "app.py"
+    app = AppTest.from_file(str(app_path), default_timeout=120)
+    app.run()
+    app.text_input[0].set_value("How many orders are there?").run()
+
+    assert not app.exception
+    rendered = " ".join(t.value for t in app.text)
+    assert rendered, f"no answer rendered; errors={[e.value for e in app.error]}"
+    assert "99,441" in rendered or "99441" in rendered
+    assert "FROM orders" in app.code[0].value.lower() or "from orders" in app.code[0].value.lower()
+    assert app.dataframe  # the result table rendered

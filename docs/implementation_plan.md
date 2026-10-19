@@ -160,9 +160,23 @@ Possible scope, subject to the Milestone 5 results:
 
 - Classify questions as `ANSWERABLE`, `AMBIGUOUS`, or `UNSUPPORTED`.
 - Request clarification for genuinely ambiguous questions rather than guessing.
+- **Support follow-up questions.** A question may refer to the previous one
+  rather than restate it: "and for late deliveries?", "break that down by
+  state", "why?". The pipeline keeps a bounded history of prior turns
+  (question, SQL, result shape) and resolves the reference before generating
+  SQL. Requirements:
+  - A **hard cap** on history length (turns and tokens), like every other loop
+    in this project. Old turns are dropped, not summarised.
+  - Each turn still produces its own validated SQL and its own grounded
+    answer. History informs generation; it never licenses reusing an earlier
+    result as if it were this question's evidence.
+  - A follow-up that cannot be resolved against the history is treated as
+    `AMBIGUOUS` and asks, rather than guessing which prior turn was meant.
+  - The clarification flow and the follow-up flow are the same mechanism: an
+    answered clarification *is* a follow-up turn.
 - Introduce **at most one** SQL repair attempt when useful and safe.
 - Capture inspectable pipeline artifacts (e.g., selected schema, generated SQL, validation outcome, execution error, result, final answer).
-- Strengthen the fixed evaluation suite, including classification and failure handling.
+- Strengthen the fixed evaluation suite, including classification, failure handling, and **multi-turn sequences** (a first question plus two or three follow-ups, graded on the final answer and on whether the reference was resolved correctly).
 
 **Outcome:** Better reliability, clearer uncertainty handling, and a more inspectable pipeline. Measure improvements against the initial baseline.
 
@@ -175,8 +189,18 @@ Possible scope:
 - Route questions among `SQL_ONLY`, `REVIEW_TEXT`, and `HYBRID`.
 - Add semantic search over the Portuguese `review_comment_message` field.
 - Combine structured SQL metrics with relevant review excerpts where needed.
+- **Follow-ups across routes.** A follow-up may need a different route than the
+  question before it: "how many orders were late?" (`SQL_ONLY`) followed by
+  "what did those customers complain about?" (`REVIEW_TEXT`, scoped to the
+  previous result). Requirements:
+  - Routing is decided **per turn**, never inherited from the previous turn.
+  - A follow-up may narrow to the previous turn's rows, so the history carries
+    the prior SQL, not just the prior numbers - the scope is re-derived by
+    query, never by pasting an earlier result into the prompt.
+  - The same hard history cap as iteration 2 applies. Retrieval over review
+    text is bounded by excerpt count as well.
 - Consider a bounded agent loop of **3–4 tool steps maximum**, but only if fixed routing/pipelines demonstrably fail to cover important use cases.
-- Evaluate grounding, retrieval relevance, and integration between structured and unstructured evidence.
+- Evaluate grounding, retrieval relevance, and integration between structured and unstructured evidence, **including follow-ups that change route mid-conversation**.
 
 **Outcome:** More expressive data interaction without unjustified agent complexity.
 
