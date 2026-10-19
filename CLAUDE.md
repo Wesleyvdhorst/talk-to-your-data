@@ -10,7 +10,7 @@ The point of this project is **process, learning and conceptual ownership** as m
 
 # Current status
 
-**Iteration 1, milestone 3 (LLM Integration & End-to-End Pipeline): complete, pending a real-model run.** Next is milestone 4 (Minimal Application Interface). Update this line whenever a milestone is finished.
+**Iteration 1, milestone 3 (LLM Integration & End-to-End Pipeline): complete.** Next is milestone 4 (Minimal Application Interface). Update this line whenever a milestone is finished.
 
 Do not implement anything from a later step or iteration unless I ask for it explicitly.
 

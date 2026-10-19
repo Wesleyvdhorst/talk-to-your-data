@@ -230,3 +230,61 @@ ever stop being plain identifiers.
 argued, in writing, that the denylist was "deliberately redundant". The second
 review was right about the mechanism and wrong about the impact. Testing the
 exploit took two minutes and was the only way to tell those two apart.
+
+## Milestone 3 — LLM integration and the end-to-end pipeline
+
+**Attempted:** the two model calls (`llm.py`) and the pipeline that connects
+them to the milestone 1 executor and the milestone 2 validator
+(`pipeline.py`).
+
+**Where AI helped — and where it would have been wrong from memory.** I had
+Claude read its own `claude-api` skill rather than recall the API, and three
+things came back that contradict every text-to-SQL example I have seen:
+
+- `temperature` is rejected with a 400 on Sonnet 5.5. The standard
+  `temperature=0` for deterministic SQL does not exist on this model.
+- Forced tool use (`tool_choice: {type: "any"}`) is also a 400, so the "force
+  a tool call to get clean JSON" trick is gone.
+- Assistant prefill is a 400 too, so the other usual trick for "emit only
+  SQL" is gone as well.
+
+All three were ways of constraining output. Structured outputs
+(`output_config.format` with `additionalProperties: false`) replaces all of
+them in one parameter, and a test pins that `temperature` and `thinking` never
+reappear in the request.
+
+**Decisions I made:** both calls live in one file, which is the only file that
+imports `anthropic`; `generate_answer` takes columns and rows rather than a
+`QueryResult`, so `llm.py` does not depend on the database layer; the caller
+owns the connection, so a Streamlit layer can keep one open; the pipeline
+catches only `UnsafeSQL`, `duckdb.Error` and `TimeoutError`, so a missing key
+or a malformed response still raises as an app problem rather than being
+reported as a bad question.
+
+**What the first real run showed.** All 15 integration tests passed on the
+first attempt (~$0.06), including the two trap assertions, and an inspection
+run over four harder questions was correct on all four. The one I did not
+expect:
+
+```sql
+WITH late AS (SELECT order_id FROM orders
+              WHERE order_delivered_customer_date > order_estimated_delivery_date),
+     r AS (SELECT order_id, AVG(review_score) AS s FROM order_reviews GROUP BY order_id)
+SELECT AVG(r.s), COUNT(*) FROM late JOIN r ON r.order_id = late.order_id
+```
+
+It aggregated reviews per order *before* averaging, which is precisely what
+trap #3 warns about and what a naive `orders JOIN order_reviews` would get
+wrong. The schema notes are doing real work, not decorating the prompt.
+
+**What is still wrong:** the prose for "how many customers" said "counted as
+distinct customer IDs", while the SQL correctly used `customer_unique_id`.
+Right number, misleading sentence - and "customer ID" is the name of the trap.
+The answer prompt needs to make the model name the column it used or say
+nothing about method. Noted for milestone 5 rather than tuned now, because
+tuning before the eval set exists is how you leak the eval into the prompt.
+
+**Learned:** the failure I expected (the model falling for the customer-identity
+trap) did not happen, and the failure I got was in the *explanation* of a
+correct query. Grounding is not only about numbers; a true number with a wrong
+account of where it came from is still a wrong answer to a person who trusts it.
