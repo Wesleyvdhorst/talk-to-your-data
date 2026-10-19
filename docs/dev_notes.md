@@ -110,3 +110,58 @@ documented rather than assumed closed.
 different ways (can it write the database?) and none asked the adjacent one
 (can it touch the machine?). Breadth of threat model beats number of
 assertions. Thirty passing tests gave false confidence.
+
+## Milestone 2 — Database Intelligence & SQL Safety
+
+**Attempted:** the schema context that goes into the prompt, a validator for
+untrusted model-generated SQL, and cost bounds on query execution.
+
+**Where AI helped:** it found that DuckDB already ships what the validator
+needs — `duckdb.extract_statements()` returns one `StatementType` per
+statement, which is real parsing rather than keyword matching, and no new
+dependency. It also established that DuckDB has *no* statement-timeout setting
+(only `memory_limit`), which decided the timeout design for me.
+
+**Decisions I made:**
+
+- All nine tables go into the context every time (~4.3k chars). Per-question
+  table selection is an optimisation with no observed problem, and it risks
+  dropping a table the question needed.
+- The cost bound lives in `db.py`, not the pipeline. Defense belongs at the
+  layer that executes.
+- Semantics as a Python dict in `schema.py` rather than a Markdown file read at
+  runtime: one less file, no I/O, diffable next to the code that uses it. The
+  tradeoff is prose living in Python.
+
+**What failed:** the first row cap wrapped the query as
+`SELECT * FROM (<sql>) LIMIT n+1`. It rewrote the model's SQL — so error
+positions pointed at text the model never wrote — and it broke the two existing
+tests that document engine behaviour (`SET threads = 2` and
+`SELECT 1; SELECT 2` both became syntax errors inside a subquery). Replaced
+with `result.fetchmany(max_rows + 1)`, which streams: the cap applies without
+materialising the whole result and without touching the SQL.
+
+**Two surprises, both now pinned by tests:**
+
+- DuckDB parses `DESCRIBE`, `SHOW TABLES` and `PRAGMA database_list` as
+  `SELECT`. They are read-only and return a result set, so allowing them is
+  correct — and the side-effecting spellings (`PRAGMA threads = 4`,
+  `PRAGMA enable_external_access = true`) parse as `SET` and are rejected. The
+  parse type, not the keyword, is what separates them.
+- `statements[0].type is duckdb.StatementType.SELECT` is *always false*. The
+  pybind11 enum members are not interned singletons, so identity fails while
+  `==` works. Every allowed query was being rejected with the message "this is
+  a SELECT statement", which is the kind of error that reads as a logic bug in
+  the test rather than in the comparison operator.
+
+**Learned:** classifying SQL by parse type rather than by keyword is both
+shorter and stronger — `/* SELECT */ CREATE TABLE evil AS SELECT * FROM orders`
+is rejected as a CREATE without any string inspection. And a row cap is not a
+cost bound: `SELECT count(*)` over a cross join returns one row after counting
+a trillion, which is why the timeout exists as well.
+
+**Known rough edges:** the trap numbers in `TABLE_NOTES` are hand-written
+real-data facts, so against the small fixture database the notes and the
+introspected row counts disagree. `max_rows=1000` and 30 seconds are guesses,
+not measurements. Nothing calls `validate()` yet — wiring it in front of
+execution is milestone 3.

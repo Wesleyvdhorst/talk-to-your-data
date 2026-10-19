@@ -165,3 +165,38 @@ def test_multiple_statements_are_NOT_blocked_here(conn):
     this test is here so the gap is visible rather than assumed closed.
     """
     assert run_query(conn, "SELECT 1; SELECT 2").rows == [(2,)]
+
+
+# --- Cost bounds. Not safety: they stop an honest query running away. ---
+
+
+def test_rows_are_capped_and_the_truncation_is_reported(conn):
+    result = run_query(conn, "SELECT * FROM range(100)", max_rows=10)
+    assert result.row_count == 10
+    assert result.truncated
+
+
+def test_a_result_that_fits_is_not_marked_truncated(conn):
+    result = run_query(conn, "SELECT * FROM range(10)", max_rows=10)
+    assert result.row_count == 10
+    assert not result.truncated
+
+
+def test_a_runaway_query_times_out_visibly(conn):
+    """One row, a very long wait: the row cap alone cannot bound this."""
+    with pytest.raises(TimeoutError, match="exceeded"):
+        run_query(
+            conn,
+            "SELECT count(*) FROM range(1000000) a, range(1000000) b",
+            timeout_seconds=0.5,
+        )
+
+
+def test_the_connection_still_works_after_a_timeout(conn):
+    with pytest.raises(TimeoutError):
+        run_query(
+            conn,
+            "SELECT count(*) FROM range(1000000) a, range(1000000) b",
+            timeout_seconds=0.5,
+        )
+    assert run_query(conn, "SELECT count(*) FROM orders").rows == [(4,)]
