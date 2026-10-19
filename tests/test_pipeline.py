@@ -250,3 +250,12 @@ def test_the_trace_says_a_deterministic_rejection_cost_nothing(conn):
     client = ScriptedClient("SELECT 1")
     result = answer_question("!!!", conn, client=client, jev=StubJev())
     assert "no model call" in dict(result.trace)["classify"]
+
+
+def test_the_classifier_is_given_the_columns_not_only_the_table_names(conn, jev):
+    """It decides whether the data can answer the question, and that is a
+    question about which columns exist."""
+    client = ScriptedClient("SELECT count(*) AS n FROM orders", "4 orders.")
+    answer_question("how many orders?", conn, client=client, jev=jev)
+    assert "customer_unique_id" in jev.instructions[0]
+    assert "orders: order_id, customer_id, order_status" in jev.instructions[0]

@@ -62,3 +62,33 @@ def test_a_deterministic_rejection_carries_no_confidence():
     assert result.confidence is None
     assert result.probabilities is None
     assert result.model is None
+
+
+# The classifier's job is to decide whether this data can answer a question,
+# and that is a question about columns: "how old are our customers" fails on a
+# missing column, not a missing table. Without them it guesses from table
+# names - measurably: freight value, product weight and description length all
+# got the right label at 0.54-0.76 confidence, where questions decidable from
+# a table name alone sat at 0.91-1.00.
+
+
+def test_the_columns_are_sent_to_the_classifier():
+    jev = StubJev()
+    classify("how old are our customers?", "customers: customer_id, customer_city", client=jev)
+    instructions = jev.instructions[0]
+    assert "TABLES AND COLUMNS" in instructions
+    assert "customers: customer_id, customer_city" in instructions
+    assert "COLUMNS" in instructions  # and the instruction to reason from them
+
+
+def test_without_columns_the_block_is_absent_rather_than_empty():
+    """classify() stays testable with no database, but says nothing false."""
+    jev = StubJev()
+    classify("how many orders?", client=jev)
+    assert "TABLES AND COLUMNS" not in jev.instructions[0]
+
+
+def test_a_deterministic_rejection_sends_no_columns_because_it_sends_nothing():
+    jev = StubJev()
+    classify("!!!", "orders: order_id", client=jev)
+    assert jev.instructions == []

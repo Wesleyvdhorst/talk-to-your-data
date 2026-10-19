@@ -38,3 +38,20 @@ def test_relationships_are_listed(conn):
 def test_context_is_small_enough_to_send(conn):
     """Small context is a rule, not an aspiration. ~2.5k tokens at 4 chars."""
     assert len(schema_context(conn)) < 10_000
+
+
+def test_the_column_overview_is_one_line_per_table_and_nothing_else(conn):
+    """What the classifier needs: which columns exist. Not types, not row
+    counts, not join hazards - those are about writing the query."""
+    from twyd.schema import column_overview
+
+    overview = column_overview(conn)
+    lines = overview.splitlines()
+    assert len(lines) == 9  # all nine tables
+    assert "customers: customer_id, customer_unique_id" in overview
+    assert "orders: order_id, customer_id, order_status" in overview
+    # the things it deliberately leaves out
+    assert "NOTE" not in overview
+    assert "JOIN RULES" not in overview
+    assert "VARCHAR" not in overview
+    assert "rows" not in overview
