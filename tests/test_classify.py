@@ -92,3 +92,29 @@ def test_a_deterministic_rejection_sends_no_columns_because_it_sends_nothing():
     jev = StubJev()
     classify("!!!", "orders: order_id", client=jev)
     assert jev.instructions == []
+
+
+def test_the_history_is_classified_with_the_question_labelled_last():
+    """"and in 2018?" is not a question on its own: without the previous turn
+    the only honest label for it is AMBIGUOUS. The classifier takes the
+    rendered string, so this module still knows nothing about conversations."""
+    jev = StubJev("ANSWERABLE")
+    classify("and in 2018?", "orders: order_id", client=jev, history="EARLIER: 2017?")
+    (state,) = jev.questions
+    assert "EARLIER: 2017?" in state
+    assert state.endswith("CURRENT QUESTION: and in 2018?")
+
+
+def test_without_history_the_state_is_the_bare_question():
+    jev = StubJev("ANSWERABLE")
+    classify("how many orders?", "orders: order_id", client=jev)
+    assert jev.questions == ["how many orders?"]
+
+
+def test_the_criteria_say_what_makes_a_follow_up_answerable_or_not():
+    """Both sides, because a follow-up can go either way: answerable when the
+    earlier turns supply what it leaves out, ambiguous when nothing does."""
+    from twyd.classify import _CRITERIA
+
+    assert "only makes sense as a follow-up" in _CRITERIA[ANSWERABLE]
+    assert "earlier turns do NOT supply" in _CRITERIA[AMBIGUOUS]

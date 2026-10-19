@@ -14,7 +14,7 @@ from pathlib import Path
 import streamlit as st
 
 from twyd.db import connect
-from twyd.pipeline import answer_question
+from twyd.pipeline import MAX_HISTORY_TURNS, answer_question
 
 # Env var so the tests can point the app at the fixture database. AppTest
 # re-executes this file, so a monkeypatched module attribute would not survive.
@@ -73,16 +73,19 @@ with st.sidebar:
         st.subheader(heading)
         for example in examples:
             if st.button(example, width="stretch"):
-                st.session_state.question = example
+                st.session_state.pending = example
 
-question = st.text_input(
-    "Your question", key="question", placeholder="How many orders were late?"
-)
+# Every answered turn, in order. The Answer objects themselves, because a
+# Streamlit rerun re-executes this file from the top: anything not kept here
+# cannot be shown again. The history the pipeline sees is derived from them
+# (Answer.turn), so the UI never maintains a second account of the
+# conversation that could disagree with what ran.
+if "answers" not in st.session_state:
+    st.session_state.answers = []
 
-if question:
-    with st.spinner("Generating SQL and running it…"):
-        result = answer_question(question, _database().cursor())
-
+def render(result) -> None:
+    """Show one answered turn. No decisions: everything it branches on was
+    decided by the pipeline."""
     # st.text renders plain text. Everything below is either model output or a
     # database message, and both can quote review_comment_message - public free
     # text that in this dataset really does contain raw URLs. Rendered as
@@ -95,23 +98,22 @@ if question:
         # Not an answer and not a failure: the pipeline understood the question
         # well enough to say it will not answer it. Its own caption, so the
         # distinction is visible rather than inferred from the wording.
-        with st.container(border=True):
-            st.caption(
-                "A question back to you"
-                if result.stage == "clarify"
-                else f"No answer — classified {result.classification.label}"
-            )
-            st.text(result.message)
+        st.caption(
+            "A question back to you - answer it below and that becomes "
+            "the next turn"
+            if result.stage == "clarify"
+            else f"No answer - classified {result.classification.label}"
+        )
+        st.text(result.message)
     elif result.ok:
-        with st.container(border=True):
-            st.caption("Answer")
-            st.text(result.answer)
-            if result.assumption:
-                # The choice the query made that the question left open. Shown
-                # next to the answer rather than buried in the trace, because
-                # it is the one thing the number cannot be judged without.
-                st.caption("The query assumed")
-                st.text(result.assumption)
+        st.caption("Answer")
+        st.text(result.answer)
+        if result.assumption:
+            # The choice the query made that the question left open. Shown
+            # next to the answer rather than buried in the trace, because
+            # it is the one thing the number cannot be judged without.
+            st.caption("The query assumed")
+            st.text(result.assumption)
     else:
         # The stage is our own string and says what went wrong; the detail
         # below it is untrusted, so it stays plain.
@@ -145,3 +147,46 @@ if question:
                 st.info("The query ran and matched no rows.")
             if result.result.truncated:
                 st.warning("Showing the first rows only; the result was truncated.")
+
+
+for past in st.session_state.answers:
+    with st.chat_message("user"):
+        st.text(past.question)
+    with st.chat_message("assistant"):
+        render(past)
+
+# An example button sets this and reruns; st.chat_input returns on submit.
+question = st.session_state.pop("pending", None) or st.chat_input(
+    "Ask a question, or follow up on the last answer"
+)
+
+if question:
+    with st.chat_message("user"):
+        st.text(question)
+    with st.chat_message("assistant"):
+        with st.spinner("Generating SQL and running it…"):
+            result = answer_question(
+                question,
+                _database().cursor(),
+                # Derived from the answers themselves, newest last. The
+                # pipeline applies the cap; the UI does not get to choose how
+                # much of the past the model sees.
+                history=tuple(a.turn for a in st.session_state.answers),
+            )
+        render(result)
+    st.session_state.answers.append(result)
+
+# Written to the sidebar last, after this turn has been appended: st.sidebar is
+# a container, so writing to it here puts it below the examples while counting
+# the turn the user just asked. Doing it earlier made the count and the reset
+# button lag one question behind.
+if st.session_state.answers:
+    with st.sidebar:
+        st.divider()
+        st.caption(
+            f"{len(st.session_state.answers)} turns so far; the last "
+            f"{MAX_HISTORY_TURNS} go to the model as context."
+        )
+        if st.button("Start a new conversation", width="stretch"):
+            st.session_state.answers = []
+            st.rerun()

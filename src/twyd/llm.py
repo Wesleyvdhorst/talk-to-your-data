@@ -111,6 +111,13 @@ Rules:
 - If the question needs a column that does not exist, write the closest query
   the schema does support rather than inventing a column.
 
+- If EARLIER TURNS are given, the current question may be a follow-up that
+  only makes sense with them: "and in 2018?" means the previous question with
+  that year, "break that down by state" means the previous query grouped by
+  state. Rewrite the previous query rather than starting over, and use the
+  earlier SQL for its shape only - never quote a number from an earlier turn,
+  because this query has to stand on its own result.
+
 Also report the `assumption`: the one choice this query makes that the question
 left open and that would change the number if made differently. A denominator
 (which rows the average divides by), an inclusion (whether rows with no child
@@ -184,16 +191,34 @@ class Generated(NamedTuple):
 
 
 def generate_sql(
-    question: str, schema_context: str, client: _Client | None = None
+    question: str,
+    schema_context: str,
+    client: _Client | None = None,
+    history: str = "",
 ) -> Generated:
-    """Return the SQL the model proposes. It is untrusted until validated."""
+    """Return the SQL the model proposes. It is untrusted until validated.
+
+    `history` is the earlier turns, rendered by pipeline.history_block, and
+    goes in the USER message rather than the system prompt. Two reasons, both
+    deliberate. The system prompt is the stable prefix - prompt caching is a
+    prefix match, so putting a per-turn string in it would invalidate the
+    schema context behind it on every question. And earlier turns are the
+    user's own text: in the system prompt they would carry operator authority,
+    which is how a question talks the rules out of a model. The rules stay
+    above; the conversation stays below.
+    """
     client = client or anthropic.Anthropic()
+    content = (
+        f"{history}\n\nCURRENT QUESTION (write SQL for this one): {question}"
+        if history
+        else question
+    )
     response = client.messages.create(
         model=MODEL,
         max_tokens=MAX_TOKENS,
         output_config={"effort": SQL_EFFORT, "format": _SQL_FORMAT},
         system=_SQL_SYSTEM.format(schema_context=schema_context),
-        messages=[{"role": "user", "content": question}],
+        messages=[{"role": "user", "content": content}],
     )
     # The schema guarantees the shape, so a KeyError or JSONDecodeError here is
     # a real anomaly and is left to propagate. That includes a missing
