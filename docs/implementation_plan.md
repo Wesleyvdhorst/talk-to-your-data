@@ -9,13 +9,15 @@ The assignment at `docs/requirements.txt` is authoritative. Work on **one milest
 
 ## Current progress
 
-- **Active product iteration:** 2 — Robustness, complete
-- **Implementation milestones 1–9 done.** Iteration 1 shipped the linear
+- **Active product iteration:** 3 — the final touches, in progress
+- **Implementation milestones 1–10 done.** Iteration 1 shipped the linear
   pipeline and a recorded baseline; iteration 2 added grounded claims about
   results (6), classification before SQL (7), clarification and an
-  inspectable trace (8), and a graded eval covering all of it (9).
-- **Latest run: 16/18** (`docs/eval_results.md`). Classification 17/18,
-  values 9/10. The iteration 1 baseline is archived in
+  inspectable trace (8), and a graded eval covering all of it (9). Iteration 3
+  opened with the borderline classification (10).
+- **Latest run: 17/18** (`docs/eval_results.md`). Classification 18/18,
+  values 9/10. The iteration 2 baseline is archived in
+  `docs/eval_results_iteration2.md` and iteration 1 in
   `docs/eval_results_iteration1.md`.
 - **Milestone 10 (one bounded SQL repair attempt) was not built**, on
   purpose: the run produced zero validation and zero execution failures, so
@@ -206,9 +208,22 @@ the four questions this iteration is about. All four recorded defects are
 fixed, with the evidence in `README.md`. The two remaining failures are the
 input to iteration 3.
 
-# Product Iteration 3 — Richer Data Understanding
+# Product Iteration 3 — the final touches
 
-**Goal:** the two failures the iteration 2 run recorded, then review text.
+**Goal:** the two failures the iteration 2 run recorded, and the one
+structural gap it left: a clarification that ends the turn.
+
+**Scope decided before starting.** Items 1-3 below are in; review text (4) and
+the agent loop (5) are not. Review text was dropped on its cost rather than
+its value, and the technical half of that is worth keeping: **DuckDB's `fts`
+and `vss` extensions cannot be used in this app at all.** `LOAD fts` on a
+connection opened with `enable_external_access=false` returns `Permission
+Error: Loading external extensions is disabled through configuration`, and
+neither extension is installed (duckdb 1.5.6, verified directly). Full-text or
+vector search would have meant either embeddings precomputed into a plain
+column and ranked with core `list_cosine_similarity` — no extension, no vector
+database — or relaxing the engine configuration that is half of the app's
+safety story. The first is real work; the second is not on the table.
 
 **Driven by evidence, in this order:**
 
@@ -220,10 +235,14 @@ input to iteration 3.
    every denominator would make the app useless, so the open question is how
    to detect *consequential* choices only — possibly by generating the query
    two ways and comparing, which is evidence rather than a prompt rule.
-2. **Overlapping criteria at the margin.** "How are we doing recently?" is
-   labelled `UNSUPPORTED` at 0.67 where `AMBIGUOUS` serves the user better.
-   Any change here is a change to a classifier that the eval already measures,
-   so it must be recorded as its own before/after run.
+2. **Overlapping criteria at the margin — done, milestone 10.** "How are we
+   doing recently?" was `UNSUPPORTED` at 0.67; it is `AMBIGUOUS` at 0.95 now.
+   The criteria learned one distinction: ambiguity is a choice the *data*
+   could make, unsupported is what the data *lacks*. Widening them that far
+   also moved "how will we be doing next quarter?" to `AMBIGUOUS`, caught by
+   an integration test written as a control, so the criteria now carve out
+   forecasts explicitly. Recorded as its own before/after run: 16/18 to 17/18,
+   classification 17/18 to 18/18, nothing else moved.
 3. **Follow-up questions**, moved from iteration 2. A question may refer to
    the previous one: "and for late deliveries?", "break that down by state".
    Requirements unchanged from the earlier plan:

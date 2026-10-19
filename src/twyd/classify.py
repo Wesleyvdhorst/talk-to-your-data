@@ -59,8 +59,18 @@ _CRITERIA = {
         "A question about this data whose answer depends on a choice the "
         "question does not make. An undefined metric ('the best products', "
         "'top sellers', 'performance'), which could mean revenue, units sold "
-        "or review score and gives a different answer for each. Or an entity "
-        "that could mean more than one thing in this data."
+        "or review score and gives a different answer for each. An undefined "
+        "period ('recently', 'lately', 'these days'), which could mean a "
+        "month, a quarter or the whole period. A question that leaves BOTH "
+        "open ('how are we doing recently?') belongs here as well, and not "
+        "under unsupported: these tables can answer it once the metric and "
+        "the period are chosen, so asking which was meant is more use than "
+        "declining. Or an entity that could mean more than one thing in this "
+        "data. This label is only ever for a choice the DATA could make. A "
+        "question asking what WILL happen, or for a forecast or a projection "
+        "('how will we be doing next quarter?'), is unsupported however "
+        "vaguely it is worded, because no choice of metric or period would "
+        "let these tables answer it."
     ),
     UNSUPPORTED: (
         "Anything these tables cannot answer, however clearly it is asked: "
@@ -70,7 +80,12 @@ _CRITERIA = {
         "characters, a greeting, or a request aimed at the assistant rather "
         "than the data. Asking about a period the data does not cover is NOT "
         "unsupported - counting rows in that period is still a question these "
-        "tables answer, with zero as the answer."
+        "tables answer, with zero as the answer. Vagueness on its own is "
+        "never unsupported either: unsupported is about what the DATA lacks - "
+        "a column that does not exist, the future, or input that is not a "
+        "question about this data at all - not about how loosely the question "
+        "is worded. If some reasonable reading of it could be answered from "
+        "the listed columns, it is ambiguous rather than unsupported."
     ),
 }
 

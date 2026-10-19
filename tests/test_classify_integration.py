@@ -76,10 +76,31 @@ def test_what_this_data_cannot_answer_is_declined(question, columns):
     [
         "What are the best products?",  # best by revenue, units or reviews?
         "Which sellers perform best?",
+        # Milestone 10. This came back UNSUPPORTED at 0.67 - the lowest
+        # confidence in the iteration 2 run - because nothing in it names a
+        # metric or a period. Both are choices the data CAN make, so the right
+        # move is to ask, and the criteria now say so.
+        "How are we doing recently?",
+        "How is business lately?",
     ],
 )
-def test_an_undefined_metric_is_ambiguous(question, columns):
+def test_an_undefined_metric_or_period_is_ambiguous(question, columns):
     assert classify(question, columns).label == AMBIGUOUS
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        # The controls for the milestone 10 criteria change. Widening AMBIGUOUS
+        # to cover vagueness must not pull a genuinely unanswerable question
+        # with it: these lack a column or ask about the future, which is what
+        # UNSUPPORTED is for, however vaguely they are worded.
+        "How are our profit margins doing recently?",
+        "How will we be doing next quarter?",
+    ],
+)
+def test_vague_wording_does_not_make_a_missing_column_ambiguous(question, columns):
+    assert classify(question, columns).label == UNSUPPORTED
 
 
 def test_the_concrete_model_version_is_recorded(columns):

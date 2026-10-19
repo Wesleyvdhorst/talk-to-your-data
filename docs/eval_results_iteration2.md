@@ -1,0 +1,301 @@
+# Evaluation results — iteration 2 (archived baseline)
+
+Frozen: the iteration 2 run, kept as the baseline iteration 3 is measured against. It was produced by `uv run --env-file .env python -m twyd.eval`, which now overwrites `eval_results.md` instead. The question set and the grading rules are in `eval_questions.md`; the iteration 1 baseline is in `eval_results_iteration1.md`.
+
+**16/18 questions correct.** Classification 17/18; values 9/10. Total time 48.4s.
+
+| # | Question | Covers | Verdict | Label | Expected | Got | Ended at | Why not |
+|---|---|---|---|---|---|---|---|---|
+| 1 | How many orders are there? | count | **PASS** | ANSWERABLE | 99,441 | 99,441 | answer |  |
+| 2 | How many customers does the company have? | identity trap | **PASS** | ANSWERABLE | 96,096 | 96,096 | answer |  |
+| 3 | How many orders were placed in 2017? | time filter | **PASS** | ANSWERABLE | 45,101 | 45,101 | answer |  |
+| 4 | What is the average review score? | aggregation | **PASS** | ANSWERABLE | 4.0864 | 4.0864 | answer |  |
+| 5 | What is the average review score for orders delivered later than estimated? | join inflation trap | **PASS** | ANSWERABLE | 2.5666 | 2.5666 | answer |  |
+| 6 | How many orders have no reviews at all? | anti-join trap | **PASS** | ANSWERABLE | 768 | 768 | answer |  |
+| 7 | Which customer state has the most orders? | join + group by + ordering | **PASS** | ANSWERABLE | SP | SP | answer |  |
+| 8 | What is the average number of items per order? | child-table grain | **FAIL** | ANSWERABLE | 1.1417 | 1.1328 | answer | got 1.1328, expected 1.1417 |
+| 9 | What are the best products? | ambiguous | **PASS** | AMBIGUOUS | — | — | clarify |  |
+| 10 | What will sales be next month? | unsupported: the future | **PASS** | UNSUPPORTED | — | — | classify |  |
+| 11 | asdfgh | malformed | **PASS** | UNSUPPORTED | — | — | classify |  |
+| 12 | How many orders were placed in 2030? | empty result is correct, NOT unsupported | **PASS** | ANSWERABLE | 0 | 0 | answer |  |
+| 13 | What is our profit margin on electronics? | unsupported: no cost or margin data | **PASS** | UNSUPPORTED | — | — | classify |  |
+| 14 | How old are our customers? | unsupported: no demographics | **PASS** | UNSUPPORTED | — | — | classify |  |
+| 15 | Which sellers perform best? | ambiguous: undefined metric | **PASS** | AMBIGUOUS | — | — | clarify |  |
+| 16 | How are we doing recently? | ambiguous: undefined metric and undefined period | **FAIL** | **UNSUPPORTED** | — | — | classify | labelled UNSUPPORTED, expected AMBIGUOUS |
+| 17 | What is the average review score for each customer state? | grounding: many rows, and the answer must not miscount them | **PASS** | ANSWERABLE | — | AM | answer |  |
+| 18 | What is the average freight value per order? | answerable only if the classifier knows the columns | **PASS** | ANSWERABLE | 22.8236 | 22.8236 | answer |  |
+
+## What each question produced
+
+### 1. How many orders are there?
+
+*count — PASS, 3.5s*
+
+```
+classify         ANSWERABLE - confidence 0.98, jev-1.13.0
+generate_sql     42 characters
+validate         passed
+run_query        1 rows
+generate_answer  33 characters
+```
+
+```sql
+SELECT COUNT(*) AS order_count FROM orders
+```
+
+**Answer:** There are 99,441 orders in total.
+
+### 2. How many customers does the company have?
+
+*identity trap — PASS, 3.5s*
+
+```
+classify         ANSWERABLE - confidence 0.83, jev-1.13.0
+generate_sql     74 characters
+validate         passed
+run_query        1 rows
+generate_answer  164 characters
+```
+
+```sql
+SELECT COUNT(DISTINCT customer_unique_id) AS customer_count FROM customers
+```
+
+**Answer:** The company has 96,096 customers, counted as distinct people (by `customer_unique_id`) rather than orders. A person who ordered more than once is counted only once.
+
+### 3. How many orders were placed in 2017?
+
+*time filter — PASS, 3.2s*
+
+```
+classify         ANSWERABLE - confidence 1.00, jev-1.13.0
+generate_sql     153 characters
+validate         passed
+run_query        1 rows
+generate_answer  144 characters
+```
+
+```sql
+SELECT COUNT(*) AS order_count FROM orders WHERE order_purchase_timestamp >= TIMESTAMP '2017-01-01' AND order_purchase_timestamp < TIMESTAMP '2018-01-01'
+```
+
+**Answer:** There were 45,101 orders placed in 2017, counting every order with a purchase timestamp from January 1, 2017 up to the end of December 31, 2017.
+
+### 4. What is the average review score?
+
+*aggregation — PASS, 3.6s*
+
+```
+classify         ANSWERABLE - confidence 0.91, jev-1.13.0
+generate_sql     63 characters
+validate         passed
+run_query        1 rows
+generate_answer  187 characters
+```
+
+```sql
+SELECT AVG(review_score) AS avg_review_score FROM order_reviews
+```
+
+**Answer:** The average review score is about 4.09 (4.08642062404257 in the result). The query averages over every row in the reviews table, so orders with more than one review count once per review.
+
+### 5. What is the average review score for orders delivered later than estimated?
+
+*join inflation trap — PASS, 5.0s*
+
+```
+classify         ANSWERABLE - confidence 0.98, jev-1.13.0
+generate_sql     316 characters
+validate         passed
+run_query        1 rows
+generate_answer  290 characters
+```
+
+```sql
+WITH late AS (SELECT order_id FROM orders WHERE order_delivered_customer_date > order_estimated_delivery_date), r AS (SELECT order_id, AVG(review_score) AS s FROM order_reviews GROUP BY order_id) SELECT AVG(r.s) AS avg_review_score, COUNT(*) AS late_orders_with_reviews FROM late JOIN r ON r.order_id = late.order_id
+```
+
+**Answer:** Orders delivered later than estimated have an average review score of about 2.57. That figure covers 7,662 late orders that have at least one review, and orders without a review are left out. Where an order had several reviews, they were averaged per order first, so each order counts once.
+
+### 6. How many orders have no reviews at all?
+
+*anti-join trap — PASS, 3.0s*
+
+```
+classify         ANSWERABLE - confidence 1.00, jev-1.13.0
+generate_sql     134 characters
+validate         passed
+run_query        1 rows
+generate_answer  150 characters
+```
+
+```sql
+SELECT COUNT(*) AS orders_without_reviews FROM orders o WHERE NOT EXISTS (SELECT 1 FROM order_reviews r WHERE r.order_id = o.order_id)
+```
+
+**Answer:** 768 orders have no reviews at all. This counts orders with no matching row in the reviews table, so an order with one or more reviews is not included.
+
+### 7. Which customer state has the most orders?
+
+*join + group by + ordering — PASS, 4.8s*
+
+```
+classify         ANSWERABLE - confidence 1.00, jev-1.13.0
+generate_sql     190 characters
+validate         passed
+run_query        1 rows
+generate_answer  185 characters
+```
+
+```sql
+SELECT c.customer_state, COUNT(DISTINCT o.order_id) AS order_count FROM orders o JOIN customers c ON o.customer_id = c.customer_id GROUP BY c.customer_state ORDER BY order_count DESC LIMIT 1
+```
+
+**Answer:** São Paulo (SP) has the most orders, with 41,746. The query counted distinct orders per customer state and kept only the top one, so this is the single leading state, not a full ranking.
+
+### 8. What is the average number of items per order?
+
+*child-table grain — FAIL, 3.8s*
+
+```
+classify         ANSWERABLE - confidence 0.98, jev-1.13.0
+generate_sql     198 characters
+validate         passed
+run_query        1 rows
+generate_answer  164 characters
+```
+
+```sql
+SELECT AVG(item_count) AS avg_items_per_order FROM (SELECT o.order_id, COUNT(oi.order_item_id) AS item_count FROM orders o LEFT JOIN order_items oi ON oi.order_id = o.order_id GROUP BY o.order_id) t
+```
+
+**Answer:** An order has about 1.13 items on average (1.1328325338643015). The query uses a LEFT JOIN, so orders with no items are included in the average with a count of zero.
+
+### 9. What are the best products?
+
+*ambiguous — PASS, 2.1s*
+
+```
+classify         AMBIGUOUS - confidence 1.00, jev-1.13.0
+clarify          asked which reading was meant
+```
+
+**Did not answer:** By "best" do you mean the highest revenue (sum of item price), the most units sold (count of order item lines), or the highest average customer review score?
+
+### 10. What will sales be next month?
+
+*unsupported: the future — PASS, 0.3s*
+
+```
+classify         UNSUPPORTED - confidence 0.98, jev-1.13.0
+```
+
+**Did not answer:** This dataset cannot answer that. It holds Olist's Brazilian e-commerce transactions from September 2016 to October 2018 - orders, items, payments, reviews, products, sellers and locations - with no costs, margins, customer demographics or stock, and nothing about the future.
+
+### 11. asdfgh
+
+*malformed — PASS, 0.3s*
+
+```
+classify         UNSUPPORTED - confidence 1.00, jev-1.13.0
+```
+
+**Did not answer:** This dataset cannot answer that. It holds Olist's Brazilian e-commerce transactions from September 2016 to October 2018 - orders, items, payments, reviews, products, sellers and locations - with no costs, margins, customer demographics or stock, and nothing about the future.
+
+### 12. How many orders were placed in 2030?
+
+*empty result is correct, NOT unsupported — PASS, 3.1s*
+
+```
+classify         ANSWERABLE - confidence 0.34, jev-1.13.0
+generate_sql     153 characters
+validate         passed
+run_query        1 rows
+generate_answer  130 characters
+```
+
+```sql
+SELECT COUNT(*) AS order_count FROM orders WHERE order_purchase_timestamp >= TIMESTAMP '2030-01-01' AND order_purchase_timestamp < TIMESTAMP '2031-01-01'
+```
+
+**Answer:** No orders were placed in 2030: the count came back as 0 for purchase timestamps from January 1, 2030 through the end of that year.
+
+### 13. What is our profit margin on electronics?
+
+*unsupported: no cost or margin data — PASS, 0.4s*
+
+```
+classify         UNSUPPORTED - confidence 1.00, jev-1.13.0
+```
+
+**Did not answer:** This dataset cannot answer that. It holds Olist's Brazilian e-commerce transactions from September 2016 to October 2018 - orders, items, payments, reviews, products, sellers and locations - with no costs, margins, customer demographics or stock, and nothing about the future.
+
+### 14. How old are our customers?
+
+*unsupported: no demographics — PASS, 0.4s*
+
+```
+classify         UNSUPPORTED - confidence 1.00, jev-1.13.0
+```
+
+**Did not answer:** This dataset cannot answer that. It holds Olist's Brazilian e-commerce transactions from September 2016 to October 2018 - orders, items, payments, reviews, products, sellers and locations - with no costs, margins, customer demographics or stock, and nothing about the future.
+
+### 15. Which sellers perform best?
+
+*ambiguous: undefined metric — PASS, 2.2s*
+
+```
+classify         AMBIGUOUS - confidence 0.98, jev-1.13.0
+clarify          asked which reading was meant
+```
+
+**Did not answer:** By "perform best" do you mean highest revenue (sum of item prices), most orders fulfilled, or best average customer review score?
+
+### 16. How are we doing recently?
+
+*ambiguous: undefined metric and undefined period — FAIL, 0.3s*
+
+```
+classify         UNSUPPORTED - confidence 0.67, jev-1.13.0
+```
+
+**Did not answer:** This dataset cannot answer that. It holds Olist's Brazilian e-commerce transactions from September 2016 to October 2018 - orders, items, payments, reviews, products, sellers and locations - with no costs, margins, customer demographics or stock, and nothing about the future.
+
+### 17. What is the average review score for each customer state?
+
+*grounding: many rows, and the answer must not miscount them — PASS, 4.8s*
+
+```
+classify         ANSWERABLE - confidence 0.98, jev-1.13.0
+generate_sql     346 characters
+validate         passed
+run_query        27 rows
+generate_answer  507 characters
+```
+
+```sql
+WITH r AS (SELECT order_id, AVG(review_score) AS order_score FROM order_reviews GROUP BY order_id) SELECT c.customer_state, AVG(r.order_score) AS avg_review_score, COUNT(*) AS reviewed_orders FROM orders o JOIN customers c ON c.customer_id = o.customer_id JOIN r ON r.order_id = o.order_id GROUP BY c.customer_state ORDER BY avg_review_score DESC
+```
+
+**Answer:** Average review scores range from 4.21 in AM at the top to 3.61 in RR at the bottom. The result covers 27 rows, 3 columns (customer_state, avg_review_score, reviewed_orders), complete. SP has the most reviewed orders at 41,472 with an average of 4.17, while RJ (12,687 orders) averages 3.88.
+
+Only orders that have at least one review are included, and scores are averaged per order first so orders with multiple reviews count once. Small states such as RR (46 orders) and AP (67 orders) rest on few reviews.
+
+### 18. What is the average freight value per order?
+
+*answerable only if the classifier knows the columns — PASS, 4.0s*
+
+```
+classify         ANSWERABLE - confidence 0.86, jev-1.13.0
+generate_sql     173 characters
+validate         passed
+run_query        1 rows
+generate_answer  230 characters
+```
+
+```sql
+WITH per_order AS (SELECT order_id, SUM(freight_value) AS total_freight FROM order_items GROUP BY order_id) SELECT AVG(total_freight) AS avg_freight_per_order FROM per_order
+```
+
+**Answer:** The average freight value per order is about 22.82. This sums freight across each order's item lines first, then averages those order totals. Orders with no items don't appear in `order_items`, so they aren't part of this average.
+
