@@ -27,8 +27,11 @@ def test_the_app_renders_with_no_question_and_no_model_call(app):
     assert not app.exception
     assert "Talk with your data" in app.title[0].value
     # The example buttons are the only affordance before a question is typed.
-    assert len(app.button) == 4
+    # A literal, so adding an example means looking at this test: every one of
+    # them is a claim that the question works, which only a real run can say.
+    assert len(app.button) == 11
     assert app.text_input[0].value == ""
+    assert [h.value for h in app.subheader] == ["One number", "Bigger questions"]
 
 
 def test_a_missing_database_is_reported_not_crashed(monkeypatch, tmp_path):

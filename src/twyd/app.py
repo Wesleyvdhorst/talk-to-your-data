@@ -20,10 +20,25 @@ from twyd.pipeline import answer_question
 # re-executes this file, so a monkeypatched module attribute would not survive.
 DB_PATH = Path(os.environ.get("TWYD_DB", "db/olist.duckdb"))
 
-EXAMPLES = [
+# Every one of these was run through the pipeline once before being put here:
+# an example that errors or gets a clarification is worse than no example. The
+# quick ones are single numbers that each hit a trap in docs/data_model.md; the
+# bigger ones span three or four tables, return 10-27 rows, or compute a value
+# no column holds.
+QUICK_EXAMPLES = [
     "How many customers does the company have?",
-    "What is the average review score for late deliveries?",
     "How many orders were delivered later than estimated?",
+    "What is the average review score for late deliveries?",
+    "What share of orders are paid in more than one instalment?",
+]
+
+BIGGER_EXAMPLES = [
+    "For each month, how many orders were placed and what share of them arrived late?",
+    "What is the average delivery time in days per customer state?",
+    "Which sellers have the most late deliveries, and what is their average review score?",
+    "Which product categories have the worst average review scores, counting only categories with at least 500 reviews?",
+    "Do orders with more items get worse review scores?",
+    "How much of total revenue comes from the top 10% of customers?",
     "Which product category has the highest average payment value per order?",
 ]
 
@@ -51,10 +66,14 @@ if not DB_PATH.is_file():
     st.stop()
 
 with st.sidebar:
-    st.subheader("Example questions")
-    for example in EXAMPLES:
-        if st.button(example, width="stretch"):
-            st.session_state.question = example
+    for heading, examples in (
+        ("One number", QUICK_EXAMPLES),
+        ("Bigger questions", BIGGER_EXAMPLES),
+    ):
+        st.subheader(heading)
+        for example in examples:
+            if st.button(example, width="stretch"):
+                st.session_state.question = example
 
 question = st.text_input(
     "Your question", key="question", placeholder="How many orders were late?"
