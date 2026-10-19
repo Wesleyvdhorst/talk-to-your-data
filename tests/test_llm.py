@@ -1,0 +1,117 @@
+"""Offline tests for the two LLM calls. No network, no API key needed.
+
+The stub client records the request and returns a canned response, so these
+tests check the request we send and our handling of what comes back - the
+parts we own. Whether the model writes good SQL is an integration concern.
+"""
+
+import json
+
+import pytest
+
+from twyd.llm import ANSWER_EFFORT, MODEL, SQL_EFFORT, generate_answer, generate_sql
+
+
+class StubBlock:
+    def __init__(self, text: str, type: str = "text"):
+        self.type = type
+        self.text = text
+
+
+class StubResponse:
+    def __init__(self, blocks, stop_reason="end_turn"):
+        self.content = blocks
+        self.stop_reason = stop_reason
+
+
+class StubMessages:
+    def __init__(self, response):
+        self._response = response
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return self._response
+
+
+class StubClient:
+    """Returns whatever blocks it is given, and remembers what it was asked."""
+
+    def __init__(self, blocks, stop_reason="end_turn"):
+        self.messages = StubMessages(StubResponse(blocks, stop_reason))
+
+    @property
+    def calls(self):
+        return self.messages.calls
+
+
+def sql_client(sql: str) -> StubClient:
+    return StubClient([StubBlock(json.dumps({"sql": sql}))])
+
+
+def test_generate_sql_returns_the_sql_from_the_structured_response():
+    client = sql_client("SELECT count(*) FROM orders")
+    assert (
+        generate_sql("how many orders", "SCHEMA", client=client)
+        == "SELECT count(*) FROM orders"
+    )
+
+
+def test_generate_sql_sends_the_schema_and_the_question():
+    client = sql_client("SELECT 1")
+    generate_sql("how many orders?", "TABLE orders (99,441 rows)", client=client)
+    (call,) = client.calls
+    assert "TABLE orders (99,441 rows)" in call["system"]
+    assert call["messages"] == [{"role": "user", "content": "how many orders?"}]
+
+
+def test_generate_sql_asks_for_a_single_sql_field_and_nothing_else():
+    """The output schema is what replaces temperature=0 and prefill here."""
+    client = sql_client("SELECT 1")
+    generate_sql("q", "SCHEMA", client=client)
+    schema = client.calls[0]["output_config"]["format"]["schema"]
+    assert schema["required"] == ["sql"]
+    assert schema["additionalProperties"] is False
+
+
+def test_the_settings_are_the_ones_we_decided():
+    client = sql_client("SELECT 1")
+    generate_sql("q", "SCHEMA", client=client)
+    call = client.calls[0]
+    assert call["model"] == MODEL == "claude-sonnet-5-5"
+    assert call["output_config"]["effort"] == SQL_EFFORT
+    # Sonnet 5.5 rejects both of these with a 400. Pinned so neither comes back.
+    assert "temperature" not in call
+    assert "thinking" not in call
+
+
+def test_generate_answer_passes_the_result_and_asks_for_grounding():
+    client = StubClient([StubBlock("There are 4 orders.")])
+    answer = generate_answer(
+        "how many orders", "SELECT count(*) FROM orders", ["n"], [(4,)], client=client
+    )
+    assert answer == "There are 4 orders."
+    call = client.calls[0]
+    assert call["output_config"]["effort"] == ANSWER_EFFORT
+    assert "SELECT count(*) FROM orders" in call["messages"][0]["content"]
+    assert '"rows": [[4]]' in call["messages"][0]["content"]
+    assert "only numbers that appear in the result" in call["system"]
+
+
+def test_generate_answer_tells_the_model_when_the_result_was_truncated():
+    client = StubClient([StubBlock("ok")])
+    generate_answer("q", "SELECT 1", ["n"], [(1,)], truncated=True, client=client)
+    assert "truncated" in client.calls[0]["messages"][0]["content"]
+
+
+def test_an_empty_result_is_still_sent_to_the_model():
+    """Zero rows is an answerable outcome, not a failure to report."""
+    client = StubClient([StubBlock("Nothing matched.")])
+    assert generate_answer("q", "SELECT 1", ["n"], [], client=client) == "Nothing matched."
+    assert '"rows": []' in client.calls[0]["messages"][0]["content"]
+
+
+def test_a_response_with_no_text_block_raises_rather_than_returning_empty():
+    client = StubClient([StubBlock("", type="thinking")], stop_reason="refusal")
+    with pytest.raises(ValueError, match="no text block"):
+        generate_sql("q", "SCHEMA", client=client)

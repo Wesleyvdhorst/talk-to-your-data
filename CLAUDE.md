@@ -10,7 +10,7 @@ The point of this project is **process, learning and conceptual ownership** as m
 
 # Current status
 
-**Iteration 1, milestone 2 (Database Intelligence & SQL Safety): complete.** Next is milestone 3 (LLM Integration & End-to-End Pipeline). Update this line whenever a milestone is finished.
+**Iteration 1, milestone 3 (LLM Integration & End-to-End Pipeline): complete, pending a real-model run.** Next is milestone 4 (Minimal Application Interface). Update this line whenever a milestone is finished.
 
 Do not implement anything from a later step or iteration unless I ask for it explicitly.
 
@@ -120,6 +120,7 @@ Python 3.14 is managed with `uv`.
 uv sync                                  # install dependencies
 uv run pytest                            # unit tests: offline, fixture data, fast
 uv run pytest -m integration             # integration tests: needs the real CSVs in data/
+uv run --env-file .env pytest -m integration   # ... plus real model calls (~$0.01 each)
 uv run python -c "from pathlib import Path; from twyd.ingest import ingest; print(ingest(Path('data'), Path('db/olist.duckdb')))"
 ```
 
