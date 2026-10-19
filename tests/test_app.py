@@ -53,3 +53,13 @@ def test_untrusted_text_is_never_rendered_as_markdown():
         assert widget not in source, f"{widget} renders Markdown; use st.text"
     assert "st.text(result.answer)" in source
     assert "st.text(result.error)" in source
+
+
+def test_a_declined_question_is_rendered_as_neither_an_answer_nor_an_error():
+    """Three outcomes, three renderings. A decline shown via st.error would
+    read as a bug in the app; shown as an answer it would read as a finding."""
+    source = (Path(__file__).parent.parent / "src" / "twyd" / "app.py").read_text()
+    assert "if result.declined:" in source
+    assert "st.text(result.message)" in source
+    # ...and it must come first, because a decline is also `ok`.
+    assert source.index("if result.declined:") < source.index("elif result.ok:")

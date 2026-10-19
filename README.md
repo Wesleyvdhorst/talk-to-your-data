@@ -7,7 +7,7 @@ runs it read-only, and explains the result from the rows it got back.
 uv sync
 # the nine Olist CSVs go in data/ (not committed, ~120 MB)
 uv run python -c "from pathlib import Path; from twyd.ingest import ingest; print(ingest(Path('data'), Path('db/olist.duckdb')))"
-echo 'ANTHROPIC_API_KEY=...' > .env
+printf 'ANTHROPIC_API_KEY=...\nTYPESAFE_API_KEY=...\n' > .env
 uv run --env-file .env streamlit run src/twyd/app.py
 ```
 
@@ -17,13 +17,19 @@ uv run --env-file .env streamlit run src/twyd/app.py
 
 ```
 question
+  -> classify            Jev, three labels; UNSUPPORTED or AMBIGUOUS ends here
   -> schema context      built from the live database + verified semantic notes
   -> generate_sql        LLM call #1, structured output, one {sql} field
   -> validate            parse tree: one SELECT, nine known tables, no table functions
   -> run_query           read-only DuckDB, 1,000-row cap, 30s timeout
-  -> generate_answer     LLM call #2, grounded in the returned rows only
-  -> Answer(sql, result, answer, error, stage)
+  -> generate_answer     LLM call #2, grounded in the returned rows and their shape
+  -> Answer(classification, sql, result, answer, message, error, stage)
 ```
+
+Three outcomes, kept apart: an **answer** (grounded in a result), a
+**message** (the pipeline declined - unsupported or underspecified, and no SQL
+was generated), or an **error** (something broke). A decline is an outcome,
+not a failure.
 
 | Module | Responsibility |
 |---|---|
@@ -31,7 +37,8 @@ question
 | `db.py` | read-only connections, execution, row cap, timeout |
 | `schema.py` | the prompt's schema context: columns introspected, semantics hand-written |
 | `sql_guard.py` | treats generated SQL as untrusted; allowlist over the parse tree |
-| `llm.py` | both model calls; the only file that knows the provider |
+| `classify.py` | ANSWERABLE / AMBIGUOUS / UNSUPPORTED, before any SQL exists |
+| `llm.py` | both Claude calls; the only file that knows that provider |
 | `pipeline.py` | wires the above; returns failures as fields, never as empty results |
 | `app.py` | thin Streamlit layer; contains no logic |
 | `eval.py` | the fixed evaluation set and its runner |

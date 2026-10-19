@@ -72,7 +72,14 @@ if question:
     # bracket forms, missed GFM's syntax-free autolinks, fixed those, and still
     # had a backslash bypass (\[x](url) survives any escaper that does not
     # escape the escape first). Not rendering Markdown ends the whole class.
-    if result.ok:
+    if result.declined:
+        # Not an answer and not a failure: the pipeline understood the question
+        # well enough to say it will not answer it. Its own caption, so the
+        # distinction is visible rather than inferred from the wording.
+        with st.container(border=True):
+            st.caption(f"No answer — classified {result.classification.label}")
+            st.text(result.message)
+    elif result.ok:
         with st.container(border=True):
             st.caption("Answer")
             st.text(result.answer)
@@ -81,6 +88,16 @@ if question:
         # below it is untrusted, so it stays plain.
         st.error(f"Failed at the {result.stage} stage.")
         st.text(result.error)
+
+    if result.classification:
+        with st.expander("How the question was classified"):
+            c = result.classification
+            st.text(
+                f"{c.label}\n"
+                + (f"decided without a model call: {c.reason}\n" if c.reason else "")
+                + (f"confidence: {c.confidence:.2f}\n" if c.confidence is not None else "")
+                + (f"model: {c.model}" if c.model else "")
+            )
 
     if result.sql:
         with st.expander("SQL", expanded=not result.ok):
