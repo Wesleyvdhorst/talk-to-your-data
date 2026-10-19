@@ -584,3 +584,66 @@ the rule actively made good answers worse - the model started tacking "the
 result also contains a column, late_orders_with_reviews, with a value of
 7,662" onto otherwise clean prose to satisfy it. It is reverted. No rule
 without evidence, including rules that look obviously safe.
+
+## Milestone 9 — grading the thing iteration 2 actually added
+
+**Attempted:** make the eval measure classification, not just values, and put
+the iteration 2 numbers next to the iteration 1 baseline.
+
+**The shape of the change.** Every question now has an `expected_label`, so
+the four that were record-only in iteration 1 are gradeable — there was no
+classifier then to be right or wrong about them. Six new questions, written
+before the run: two more `UNSUPPORTED` (no cost data, no demographics), two
+more `AMBIGUOUS`, one many-row grounding case, and one that is only answerable
+if the classifier knows the columns. Three independent checks: label, value,
+and (for the many-row case) row count. An `AMBIGUOUS` question also has to
+*ask* something — checked by looking for a question mark, because labelling a
+question ambiguous and then saying nothing useful is not a pass.
+
+**Result: 16/18.** Classification 17/18, values 9/10. The baseline was 8/8 on
+a set that could not grade the four questions this iteration is about, so the
+honest comparison is not 8/8 → 16/18; it is that the four questions which had
+no verdict now have one, and three of them pass.
+
+**The interesting failure, and I am not fixing it.** Question 8, "what is the
+average number of items per order?", is labelled `ANSWERABLE` at 0.98 and
+still returned 1.1328 where the reference says 1.1417 — the same split as
+iteration 1 (all 99,441 orders with zero-item orders counted as zero, versus
+the 98,666 orders that have items). So the defect iteration 2 was supposed to
+fix by asking never got asked about.
+
+That told me something I had not understood when I wrote the plan: the
+classifier catches **lexical** ambiguity — an undefined word like "best" or
+"perform" — and not **semantic** ambiguity, where the sentence reads precisely
+and the answer still depends on a modelling choice. Those are different
+problems. I could add "questions whose denominator is unstated" to the
+AMBIGUOUS criteria, and it would be wrong twice over: every average has a
+denominator choice, so the app would start interrogating reasonable questions;
+and I would be tuning the criteria against a question I had just measured,
+which is how an eval starts flattering the thing it measures. Recorded as the
+headline limitation instead, and it is the first item of iteration 3.
+
+**The other failure is a genuine margin.** "How are we doing recently?" came
+back `UNSUPPORTED` at 0.67 where I expected `AMBIGUOUS`. The data *can* answer
+it once a metric is chosen, so asking back serves the user better than
+declining — and 0.67 says the model found it close too. The criteria's
+"not a question about this data at all" clause and the undefined-metric clause
+genuinely overlap here. Fixable, but changing a classifier the eval already
+measures needs its own before/after run, so it belongs to iteration 3 rather
+than to a quiet edit inside this one.
+
+**Two settings settled by measurement rather than taste.** A confidence
+threshold is rejected: question 12, whose correct answer is zero, sits at
+0.40-0.55, *below* several questions that are genuinely harder, so any
+threshold misroutes exactly the case the set exists to protect. And thinking
+stays on for the answer call — `between_tools` earned its place in the
+clarification, where a question that varies between runs is itself a kind of
+ambiguity, but judging which caveats are real is the one place in the pipeline
+where reasoning is worth paying for.
+
+**Milestone 10 was not built, and that is the result.** Zero validation
+failures, zero execution failures across 18 questions. The repair loop had a
+condition attached to it from the start, and the condition did not fire. It
+would have been easy to build it anyway and call the iteration more complete;
+what makes it a decision rather than laziness is that the trigger is written
+down — a recorded run that fails at `validate` or `execute`.

@@ -85,42 +85,60 @@ timestamp rather than status.
 
 ## Limitations
 
-Known and measured, not hypothetical:
+Known and measured, not hypothetical. The current eval run is in
+`docs/eval_results.md` (16/18), the iteration 1 baseline in
+`docs/eval_results_iteration1.md`.
 
-- **Answer prose can misdescribe a correct result.** Twice observed: the
-  customer count described as "distinct customer IDs" when the SQL correctly
-  used `customer_unique_id`, and a 20-row result described as 19 rows with a
-  caveat built on the wrong count. The values are grounded; statements *about*
-  the result are not reliably so.
-- **Ambiguous questions get answered, not questioned.** "What are the best
-  products?" silently picks revenue. The model discloses the choice, but it
-  does not ask. Classification and clarification are iteration 2.
-- **Unsupported questions get a number.** "What will sales be next month?"
-  produced a trailing three-month average presented as an estimate. Honest
-  about its method, still an answer to a question this data cannot answer.
-- **Nonsense input can route a message through SQL.** For `asdfgh` the model
-  emitted `SELECT 'Your question looks like random keystrokes...' AS message`
-  — a valid, safe query carrying prose. The pipeline has no channel for "I
-  can't use this", so the SQL channel gets used as one.
-- **Run-to-run variance on ambiguous wording.** "Average number of items per
-  order" returned 1.1328 on one run (all orders, zero-item orders counted as
-  zero) and 1.1417 on the next (only orders that have items). Both defensible;
-  the question is underspecified. `temperature` is unavailable on this model,
-  so this cannot be pinned down by sampling settings.
-- **No conversation.** Every question is independent; follow-ups like "and for
-  late ones?" are iteration 2.
+- **Semantic ambiguity is not caught, only lexical ambiguity.** This is the
+  headline limitation. The classifier reliably spots an undefined *word* —
+  "best", "perform best" — but not a question that reads precisely and still
+  depends on a modelling choice. "What is the average number of items per
+  order?" is labelled ANSWERABLE at 0.98 and still returns 1.1328 on one run
+  (all 99,441 orders, zero-item orders counted as zero) and 1.1417 on another
+  (only the 98,666 orders that have items). Both are defensible readings of
+  the same sentence. Asking about every denominator choice would make the app
+  useless, so this is recorded rather than patched.
+- **One borderline classification.** "How are we doing recently?" is labelled
+  UNSUPPORTED at 0.67 confidence where AMBIGUOUS was expected: the data can
+  answer it once a metric is chosen, so asking back would serve the user
+  better than declining. Low confidence, and the one case in the set where the
+  three criteria genuinely overlap.
+- **The classifier's confidence is recorded, never acted on.** Thresholding it
+  is tempting and would be wrong: "how many orders were placed in 2030?" — the
+  question whose correct answer is zero — sits at 0.40–0.55, below several
+  questions that are genuinely harder.
+- **A clarification ends the turn.** The user must re-ask with the measure
+  they meant; the pipeline keeps no history, so "and for late deliveries?"
+  cannot work. Follow-up questions are iteration 3.
 - **No review-text understanding.** `review_comment_message` is Portuguese and
   present on ~41% of reviews; nothing reads it yet. Iteration 3.
+- **No SQL repair.** Deliberately absent: across 18 questions this run
+  produced zero validation and zero execution failures, so there is nothing
+  for a repair loop to fix. It will be built when a run shows it is needed.
+- **Answer prose is graded by reading.** The row count behind an answer is
+  checked deterministically (question 17), but whether a caveat is well judged
+  is not something a test here asserts.
 - **Single user, localhost.** The app binds to `127.0.0.1` and has no
-  authentication or rate limiting. It holds an API key, so do not serve it.
+  authentication or rate limiting. It holds two API keys, so do not serve it.
 - **Result size.** Queries are capped at 1,000 rows and 30 seconds; a
   truncated result is flagged, not paginated.
+
+### Fixed in iteration 2
+
+The baseline's four recorded defects, each with the evidence:
+
+| Defect in iteration 1 | Now |
+|---|---|
+| A 20-row result described as 19 rows; `customer_unique_id` called "distinct customer IDs" | Row count and column names are stated as facts; the answer call gets the schema. Question 17 grades the count |
+| `asdfgh` answered via `SELECT 'looks like random keystrokes' AS message` | Declined before any SQL exists |
+| "What will sales be next month?" answered with a trailing average | Declined; no SQL generated |
+| "What are the best products?" silently picked revenue | Asks which reading: revenue, units sold, or review score |
 
 ## Tests
 
 ```bash
-uv run pytest                                   # 123 offline, no key needed
-uv run --env-file .env pytest -m integration    # 16 real-model tests, ~$0.20
+uv run pytest                                   # 167 offline, no key needed
+uv run --env-file .env pytest -m integration    # 32 real-model tests, ~$0.25
 ```
 
 Offline tests mock the model and run on tiny fixture CSVs. Integration tests
