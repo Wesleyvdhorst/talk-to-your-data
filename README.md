@@ -22,11 +22,11 @@ question
   -> clarify             if AMBIGUOUS: LLM call asking which reading, turn ends
                          if UNSUPPORTED: fixed scope message, turn ends
   -> schema context      built from the live database + verified semantic notes
-  -> generate_sql        LLM call #1, structured output, one {sql} field
+  -> generate_sql        LLM call #1, structured output, {sql, assumption}
   -> validate            parse tree: one SELECT, nine known tables, no table functions
   -> run_query           read-only DuckDB, 1,000-row cap, 30s timeout
-  -> generate_answer     LLM call #2, grounded in the returned rows and their shape
-  -> Answer(classification, sql, result, answer, message, error, stage)
+  -> generate_answer     LLM call #2, grounded in the rows, their shape and the assumption
+  -> Answer(classification, sql, assumption, result, answer, message, error, stage)
 ```
 
 Three outcomes, kept apart: an **answer** (grounded in a result), a
@@ -90,15 +90,28 @@ Known and measured, not hypothetical. The current eval run is in
 `docs/eval_results_iteration2.md` and iteration 1 in
 `docs/eval_results_iteration1.md`.
 
-- **Semantic ambiguity is not caught, only lexical ambiguity.** This is the
-  headline limitation. The classifier reliably spots an undefined *word* —
-  "best", "perform best" — but not a question that reads precisely and still
-  depends on a modelling choice. "What is the average number of items per
-  order?" is labelled ANSWERABLE at 0.98 and still returns 1.1328 on one run
-  (all 99,441 orders, zero-item orders counted as zero) and 1.1417 on another
-  (only the 98,666 orders that have items). Both are defensible readings of
-  the same sentence. Asking about every denominator choice would make the app
-  useless, so this is recorded rather than patched.
+- **Semantic ambiguity is surfaced, not detected.** The classifier reliably
+  spots an undefined *word* — "best", "perform best" — but not a question that
+  reads precisely and still depends on a modelling choice. "What is the
+  average number of items per order?" is labelled ANSWERABLE at 0.98 and
+  returns 1.1328 (all 99,441 orders, zero-item orders counted as zero) where
+  the reference says 1.1417 (only the 98,666 orders that have items). Both are
+  defensible readings of one sentence, so the app does not ask — asking about
+  every denominator would make it useless. What it does instead is **state
+  the choice**: the SQL call returns an `assumption` alongside the query, and
+  the answer carries it — *"that average covers all orders, including the 775
+  orders with no items counted as zero items."* The number is still one of two;
+  it is no longer one of two silently. The eval still records question 8 as a
+  failure against its reference, deliberately: that failure is the evidence
+  this limitation exists.
+- **The assumption is prose, and it fires on nearly every question.** Nothing
+  branches on it, and no test asserts its wording — only that it exists, stays
+  a clause, and does not restate the SQL. In the recorded run all 11 answered
+  questions produced one, several of them genuinely load-bearing ("orders with
+  multiple reviews count once per review"), and some closer to boilerplate
+  ("every order regardless of status"). Tightening it to *consequential*
+  choices only would need a measure of consequence, which is the harder
+  problem it is standing in for.
 - **Vagueness and missing data overlap, and the boundary is prompt-written.**
   "How are we doing recently?" was UNSUPPORTED at 0.67 in iteration 2 and is
   AMBIGUOUS at 0.95 now, after the criteria were told that vagueness is about

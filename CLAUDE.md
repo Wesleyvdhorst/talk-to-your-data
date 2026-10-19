@@ -14,7 +14,9 @@ The point of this project is **process, learning and conceptual ownership** as m
 classification (10, done — 17/18, classification 18/18, recorded in
 `docs/eval_results.md` against the archived iteration 2 baseline in
 `docs/eval_results_iteration2.md`), surfacing the modelling assumption the SQL
-makes (11), and follow-up questions with bounded history (12). Review text and
+makes (11, done — still 17/18, with question 8's denominator now stated in the
+answer instead of invisible), and follow-up questions with bounded history
+(12). Review text and
 the agent loop are deliberately **not** built this iteration; the reasons are
 in `docs/implementation_plan.md`. Update this line whenever a milestone is
 finished.
