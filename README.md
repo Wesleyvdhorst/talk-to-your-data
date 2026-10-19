@@ -17,7 +17,8 @@ uv run --env-file .env streamlit run src/twyd/app.py
 
 ```
 question
-  -> classify            Jev, three labels
+  -> column overview     one line per table: its columns, ~266 tokens
+  -> classify            Jev, three labels, reasoning over those columns
   -> clarify             if AMBIGUOUS: LLM call asking which reading, turn ends
                          if UNSUPPORTED: fixed scope message, turn ends
   -> schema context      built from the live database + verified semantic notes
@@ -43,7 +44,7 @@ alongside them, so it cannot claim a stage that did not run.
 | `db.py` | read-only connections, execution, row cap, timeout |
 | `schema.py` | the prompt's schema context: columns introspected, semantics hand-written |
 | `sql_guard.py` | treats generated SQL as untrusted; allowlist over the parse tree |
-| `classify.py` | ANSWERABLE / AMBIGUOUS / UNSUPPORTED, before any SQL exists |
+| `classify.py` | ANSWERABLE / AMBIGUOUS / UNSUPPORTED from the column list, before any SQL exists |
 | `llm.py` | both Claude calls; the only file that knows that provider |
 | `pipeline.py` | wires the above; returns failures as fields, never as empty results |
 | `app.py` | thin Streamlit layer; contains no logic |

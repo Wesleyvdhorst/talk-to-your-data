@@ -50,7 +50,10 @@ _CRITERIA = {
         "or Brazilian locations, between September 2016 and October 2018. A "
         "question whose true answer is 'none' or 'zero' still belongs here: a "
         "date filter that no row matches is answerable, and the answer is "
-        "zero."
+        "zero. A value that has to be COMPUTED from the listed columns also "
+        "belongs here - a difference between two timestamps, a sum, a ratio, "
+        "a share - because the column does not have to exist ready-made for "
+        "the question to be answerable."
     ),
     AMBIGUOUS: (
         "A question about this data whose answer depends on a choice the "
@@ -71,17 +74,33 @@ _CRITERIA = {
     ),
 }
 
-_QUESTION = {
-    "label": Choice(
-        instructions=(
-            "A user asked this of a read-only database of Brazilian e-commerce "
-            "orders (the Olist dataset): orders, order items, payments, "
-            "reviews, products, sellers, customers and geolocation, covering "
-            "September 2016 to October 2018. Which of these is it?"
-        ),
-        criteria=_CRITERIA,
-    )
-}
+_INSTRUCTIONS = """\
+A user asked this of a read-only database of Brazilian e-commerce orders (the
+Olist dataset), covering September 2016 to October 2018. Which of these is it?
+
+Whether this data can answer a question is a question about which COLUMNS
+exist, so the tables and their columns are below. A question needing a column
+that is not listed cannot be answered, however reasonable it sounds.{columns}"""
+
+# Without the columns the classifier has to guess from table names, and it
+# shows: freight value, product weight and description length were all labelled
+# correctly but at 0.54-0.76 confidence, where the questions it could decide
+# from a table name alone sat at 0.91-1.00.
+_COLUMNS_BLOCK = """
+
+TABLES AND COLUMNS
+{columns}"""
+
+
+def _question(columns: str) -> dict[str, Choice]:
+    return {
+        "label": Choice(
+            instructions=_INSTRUCTIONS.format(
+                columns=_COLUMNS_BLOCK.format(columns=columns) if columns else ""
+            ),
+            criteria=_CRITERIA,
+        )
+    }
 
 
 @dataclass(frozen=True)
@@ -105,8 +124,15 @@ class Classification:
         return self.label == ANSWERABLE
 
 
-def classify(question: str, client: Any | None = None) -> Classification:
+def classify(
+    question: str, columns: str = "", client: Any | None = None
+) -> Classification:
     """Label a question. Spends nothing on input that code can already judge.
+
+    `columns` is schema.column_overview(conn) - one line per table listing its
+    columns. It is optional so this module needs no database to be tested, but
+    the pipeline always passes it: without it the classifier guesses from table
+    names.
 
     Errors from the API propagate: a missing key or an unreachable service is
     a problem with the app, not an UNSUPPORTED question, and silently
@@ -122,11 +148,12 @@ def classify(question: str, client: Any | None = None) -> Classification:
             reason=f"the question is longer than {MAX_QUESTION_CHARS} characters",
         )
 
+    questions = _question(columns)
     if client is None:
         with TypeSafeClient(model=MODEL) as owned:
-            response = owned.system_one(state=question, questions=_QUESTION)
+            response = owned.system_one(state=question, questions=questions)
     else:
-        response = client.system_one(state=question, questions=_QUESTION)
+        response = client.system_one(state=question, questions=questions)
 
     answer = response.choices["label"]
     return Classification(

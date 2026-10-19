@@ -19,7 +19,7 @@ import duckdb
 from twyd.classify import AMBIGUOUS, UNSUPPORTED, Classification, classify
 from twyd.db import QueryResult, run_query
 from twyd.llm import clarify, generate_answer, generate_sql
-from twyd.schema import schema_context
+from twyd.schema import column_overview, schema_context
 from twyd.sql_guard import UnsafeSQL, validate
 
 
@@ -124,7 +124,7 @@ def answer_question(
     if not question or not question.strip():
         return Answer(question=question, error="the question is empty", stage="generate")
 
-    classification = classify(question, client=jev)
+    classification = classify(question, column_overview(conn), client=jev)
     if classification.label == UNSUPPORTED:
         # Fixed text: the scope of the data is a fact about the data, so
         # nothing here needs a model.

@@ -112,3 +112,24 @@ def schema_context(conn: duckdb.DuckDBPyConnection) -> str:
         + "\n\nJOIN RULES\n"
         + JOIN_RULES
     )
+
+
+def column_overview(conn: duckdb.DuckDBPyConnection) -> str:
+    """One line per table: its name and its columns, nothing else.
+
+    What the classifier needs and all it needs. Deciding whether this data can
+    answer a question is a question about which columns exist - "how old are
+    our customers" fails on a missing column, not on a missing table - while
+    types, row counts and join hazards are about how to write the query, which
+    is the SQL call's problem. ~266 tokens against schema_context's ~1,070.
+    """
+    columns = conn.sql(
+        "SELECT table_name, column_name FROM duckdb_columns() "
+        "WHERE internal = false AND schema_name = 'main' "
+        "ORDER BY table_name, column_index"
+    ).fetchall()
+
+    by_table: dict[str, list[str]] = {}
+    for table, column in columns:
+        by_table.setdefault(table, []).append(column)
+    return "\n".join(f"{table}: {', '.join(cols)}" for table, cols in by_table.items())

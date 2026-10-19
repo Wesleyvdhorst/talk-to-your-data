@@ -34,12 +34,14 @@ class StubJev:
     def __init__(self, label: str = "ANSWERABLE", confidence: float = 0.99):
         self.label = label
         self.confidence = confidence
-        self.questions: list[str] = []
+        self.questions: list[str] = []  # the states it was asked about
+        self.instructions: list[str] = []  # and the context it was given
 
     def system_one(self, state, questions):
         from typesafe_sdk import ChoiceAnswer, SystemOneResponse, Usage
 
         self.questions.append(state)
+        self.instructions.append(questions["label"].instructions)
         others = (1.0 - self.confidence) / 2
         return SystemOneResponse(
             model="jev-stub",
