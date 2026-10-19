@@ -9,7 +9,16 @@ import json
 
 import pytest
 
-from twyd.llm import ANSWER_EFFORT, MODEL, SQL_EFFORT, generate_answer, generate_sql
+from twyd.llm import (
+    ANSWER_EFFORT,
+    CLARIFY_EFFORT,
+    CLARIFY_MAX_TOKENS,
+    MODEL,
+    SQL_EFFORT,
+    clarify,
+    generate_answer,
+    generate_sql,
+)
 
 
 class StubBlock:
@@ -185,3 +194,37 @@ def test_the_prompt_does_not_invite_reciting_the_shape_of_a_single_value():
     generate_answer("q", "SELECT 1", ["n"], [(1,)], client=client)
     assert "do not" in client.calls[0]["system"]
     assert "recite the RESULT line back" in client.calls[0]["system"]
+
+
+def clarify_client(question: str) -> StubClient:
+    return StubClient([StubBlock(json.dumps({"question": question}))])
+
+
+def test_clarify_returns_the_question_and_never_an_answer():
+    client = clarify_client("By best, do you mean revenue or review score?")
+    assert (
+        clarify("what are the best products?", "SCHEMA", client=client)
+        == "By best, do you mean revenue or review score?"
+    )
+
+
+def test_clarify_is_told_to_name_the_readings_and_pick_none():
+    client = clarify_client("revenue or reviews?")
+    clarify("best products?", "TABLE order_items", client=client)
+    system = client.calls[0]["system"]
+    assert "TABLE order_items" in system  # only readings the schema supports
+    assert "Do not pick one" in system
+    assert "do not answer the question" in system
+
+
+def test_clarify_runs_with_thinking_off_and_a_tight_cap():
+    """Settings worth defending: nothing here needs reasoning, and a
+    clarification that varies between runs is itself a kind of ambiguity.
+    between_tools is the only way to disable thinking on this model, and it
+    is accepted only at effort high or below."""
+    client = clarify_client("revenue or reviews?")
+    clarify("q", "SCHEMA", client=client)
+    call = client.calls[0]
+    assert call["thinking"] == {"type": "between_tools"}
+    assert call["output_config"]["effort"] == CLARIFY_EFFORT == "low"
+    assert call["max_tokens"] == CLARIFY_MAX_TOKENS == 256

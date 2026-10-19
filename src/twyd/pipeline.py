@@ -18,7 +18,7 @@ import duckdb
 
 from twyd.classify import AMBIGUOUS, UNSUPPORTED, Classification, classify
 from twyd.db import QueryResult, run_query
-from twyd.llm import generate_answer, generate_sql
+from twyd.llm import clarify, generate_answer, generate_sql
 from twyd.schema import schema_context
 from twyd.sql_guard import UnsafeSQL, validate
 
@@ -31,13 +31,6 @@ _UNSUPPORTED_MESSAGE = (
     "payments, reviews, products, sellers and locations - with no costs, "
     "margins, customer demographics or stock, and nothing about the future."
 )
-# Iteration 2, milestone 8 replaces this with a question naming the readings
-# the data supports. Until then the pipeline says that it cannot choose.
-_AMBIGUOUS_MESSAGE = (
-    "That question has more than one reading in this data, and they give "
-    "different answers. Please ask it again with the measure you mean."
-)
-
 
 @dataclass(frozen=True)
 class Answer:
@@ -70,6 +63,47 @@ class Answer:
         """True when the pipeline chose not to answer. Not an error."""
         return self.message is not None
 
+    @property
+    def trace(self) -> list[tuple[str, str]]:
+        """Every stage the question passed through, as (stage, what happened).
+
+        Derived rather than recorded: each step's outcome is already implied by
+        the fields above, and a second parallel record of it would be one more
+        thing that can disagree with what actually ran.
+        """
+        steps: list[tuple[str, str]] = []
+        if self.classification:
+            c = self.classification
+            detail = c.label
+            if c.reason:
+                detail += f" - {c.reason} (no model call)"
+            elif c.confidence is not None:
+                detail += f" - confidence {c.confidence:.2f}, {c.model}"
+            steps.append(("classify", detail))
+        if self.stage == "clarify":
+            steps.append(("clarify", "asked which reading was meant"))
+            return steps
+        if self.stage == "classify":
+            return steps
+        if self.sql:
+            steps.append(("generate_sql", f"{len(self.sql)} characters"))
+            steps.append(
+                ("validate", "rejected" if self.stage == "validate" else "passed")
+            )
+        if self.stage == "validate":
+            return steps
+        if self.result is not None:
+            rows = f"{self.result.row_count} rows"
+            steps.append(
+                ("run_query", f"{rows}, truncated" if self.result.truncated else rows)
+            )
+        elif self.stage == "execute":
+            steps.append(("run_query", "failed"))
+            return steps
+        if self.answer:
+            steps.append(("generate_answer", f"{len(self.answer)} characters"))
+        return steps
+
 
 def answer_question(
     question: str,
@@ -91,19 +125,28 @@ def answer_question(
         return Answer(question=question, error="the question is empty", stage="generate")
 
     classification = classify(question, client=jev)
-    if classification.label in (UNSUPPORTED, AMBIGUOUS):
+    if classification.label == UNSUPPORTED:
+        # Fixed text: the scope of the data is a fact about the data, so
+        # nothing here needs a model.
         return Answer(
             question=question,
             classification=classification,
-            message=(
-                _UNSUPPORTED_MESSAGE
-                if classification.label == UNSUPPORTED
-                else _AMBIGUOUS_MESSAGE
-            ),
+            message=_UNSUPPORTED_MESSAGE,
             stage="classify",
         )
 
     context = schema_context(conn)
+
+    if classification.label == AMBIGUOUS:
+        # The classifier decided *that* the question is underspecified; this
+        # decides *what to ask about it*, which needs the schema and a
+        # sentence of prose. Still no SQL: nothing is guessed at.
+        return Answer(
+            question=question,
+            classification=classification,
+            message=clarify(question, context, client=client),
+            stage="clarify",
+        )
     sql = generate_sql(question, context, client=client)
 
     try:

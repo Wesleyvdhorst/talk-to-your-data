@@ -118,3 +118,15 @@ def test_the_app_answers_a_question_end_to_end(monkeypatch):
     assert "99,441" in rendered or "99441" in rendered
     assert "FROM orders" in app.code[0].value.lower() or "from orders" in app.code[0].value.lower()
     assert app.dataframe  # the result table rendered
+
+
+def test_clarify_names_readings_and_answers_nothing(real_conn):
+    """A real clarification must ask, not answer. The check is that it offers
+    alternatives and contains no number that would be an answer."""
+    from twyd.llm import clarify
+
+    question = clarify("What are the best products?", schema_context(real_conn))
+    assert "?" in question
+    lowered = question.lower()
+    assert any(word in lowered for word in ("revenue", "sales", "units", "review"))
+    assert " or " in lowered  # more than one reading offered
