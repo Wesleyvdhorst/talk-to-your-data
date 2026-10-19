@@ -72,6 +72,15 @@ REJECTED = [
     "SELECT * FROM duckdb_settings()",
     "SELECT * FROM range(5)",
     "SELECT * FROM sqlite_master",
+    # A CTE name that is not a plain identifier. DuckDB resolves the reference
+    # to the CTE rather than the file, so this leaks nothing today - we refuse
+    # to depend on that.
+    """WITH "secrets.csv" AS (SELECT 1 AS x) SELECT * FROM 'secrets.csv'""",
+    """WITH "/etc/passwd" AS (SELECT 1) SELECT * FROM '/etc/passwd'""",
+    """WITH "s3://b/x.parquet" AS (SELECT 1) SELECT * FROM "s3://b/x.parquet" """,
+    # A CTE can never be qualified, so a qualified reference is never excused.
+    "SELECT * FROM other_db.main.orders",
+    "SELECT * FROM memory.secret_schema.orders",
     # Nothing we cannot classify gets through.
     "SELCT 1",
     "SELECT * FROM",
@@ -93,6 +102,10 @@ def test_the_rejection_says_why():
         validate("DROP TABLE orders")
     with pytest.raises(UnsafeSQL, match="does not parse"):
         validate("SELCT 1")
+
+
+def test_a_schema_qualified_reference_to_a_known_table_is_fine():
+    assert validate("SELECT count(*) FROM main.orders")
 
 
 def test_the_table_allowlist_is_the_nine_ingested_tables():

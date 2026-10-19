@@ -202,3 +202,31 @@ Consequences I accepted:
 was enumerating the attacks I had thought of. The allowlist enumerates what the
 feature actually needs, which is nine table names. Nine is a number I can
 check; the set of ways to name a file is not.
+
+A second automated review then flagged the CTE handling in that same walk: CTE
+names are collected into one flat set, so a CTE defined in one subquery excuses
+that name anywhere in the statement. I tested the obvious exploit before
+changing anything:
+
+```sql
+WITH "secrets.csv" AS (SELECT 1 AS x) SELECT * FROM 'secrets.csv'
+-- passed the validator; DuckDB returned (1,) - the CTE, not the file
+```
+
+So the bypass gets past the validator but reads nothing: the CTE shadows the
+replacement scan. Not a leak, but it depends on DuckDB's name-resolution order,
+which is not a thing I want a safety property resting on. Two cheap rules
+instead of a scope stack: a CTE name must be a plain identifier
+(`^[A-Za-z_][A-Za-z0-9_]*$`), and a catalog- or schema-qualified reference is
+never excused by a CTE name, since a CTE can carry neither. `main.orders` still
+works.
+
+The flat-set shortcut is still there, marked with a `ponytail:` comment naming
+the ceiling: an out-of-scope name fails to bind in the engine anyway, and a
+file-like name can no longer be a CTE. A scope stack goes in only if CTE names
+ever stop being plain identifiers.
+
+**Worth noting about the process:** the first review was right and I had
+argued, in writing, that the denylist was "deliberately redundant". The second
+review was right about the mechanism and wrong about the impact. Testing the
+exploit took two minutes and was the only way to tell those two apart.

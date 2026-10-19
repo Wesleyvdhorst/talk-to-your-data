@@ -14,6 +14,7 @@ a bare table reference that DuckDB resolves to a file.
 """
 
 import json
+import re
 
 import duckdb
 
@@ -22,6 +23,13 @@ from twyd.ingest import TABLES
 # The only tables any generated query may read. Same source as ingestion, so
 # the allowlist cannot drift from what was loaded.
 ALLOWED_TABLES = frozenset(TABLES)
+
+# A CTE name must be a plain identifier. A model writing analytical SQL has no
+# reason to produce anything else, while `WITH "secrets.csv" AS (...)` would
+# excuse a same-named table reference. DuckDB happens to resolve that
+# reference to the CTE rather than the file, so it leaks nothing today - this
+# refuses to depend on that.
+_PLAIN_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class UnsafeSQL(ValueError):
@@ -79,7 +87,7 @@ def _check_references(sql: str, allowed_tables: frozenset[str]) -> None:
             f"SQL could not be inspected: {tree.get('error_message', 'unsupported')}"
         )
 
-    tables: set[str] = set()
+    tables: set[tuple[str, str, str]] = set()
     functions: set[str] = set()
     cte_names: set[str] = set()
     _walk(tree, tables, functions, cte_names)
@@ -89,21 +97,51 @@ def _check_references(sql: str, allowed_tables: frozenset[str]) -> None:
             f"table functions are not allowed: {', '.join(sorted(functions))}. "
             "Only the known tables can be read."
         )
-    unknown = tables - allowed_tables - cte_names
-    if unknown:
+
+    odd_ctes = sorted(n for n in cte_names if not _PLAIN_IDENTIFIER.match(n))
+    if odd_ctes:
         raise UnsafeSQL(
-            f"unknown table reference(s): {', '.join(sorted(unknown))}. "
-            f"Allowed: {', '.join(sorted(allowed_tables))}"
+            f"CTE name(s) must be plain identifiers: {', '.join(odd_ctes)}"
         )
 
+    for catalog, schema, name in sorted(tables):
+        if catalog or schema not in ("", "main"):
+            raise UnsafeSQL(
+                f"qualified table reference not allowed: "
+                f"{'.'.join(p for p in (catalog, schema, name) if p)}"
+            )
+        # ponytail: CTE names are matched without tracking scope, so a CTE in
+        # one subquery excuses that name anywhere in the statement. Harmless
+        # here - an out-of-scope name fails to bind in the engine, and a
+        # file-like name is already rejected above. Add a scope stack if CTE
+        # names ever stop being plain identifiers.
+        if name not in allowed_tables and name not in cte_names:
+            raise UnsafeSQL(
+                f"unknown table reference: {name}. "
+                f"Allowed: {', '.join(sorted(allowed_tables))}"
+            )
 
-def _walk(node: object, tables: set[str], functions: set[str], ctes: set[str]) -> None:
+
+def _walk(
+    node: object,
+    tables: set[tuple[str, str, str]],
+    functions: set[str],
+    ctes: set[str],
+) -> None:
     """Collect every table reference, table function and CTE name in the tree."""
     if isinstance(node, dict):
         kind = node.get("type")
         if kind == "BASE_TABLE":
             # A bare string here is how DuckDB spells a file: FROM 'x.csv'.
-            tables.add(str(node.get("table_name", "")))
+            # Catalog and schema are kept: a CTE can never carry either, so a
+            # qualified reference must never be excused by a CTE name.
+            tables.add(
+                (
+                    str(node.get("catalog_name", "")),
+                    str(node.get("schema_name", "")),
+                    str(node.get("table_name", "")),
+                )
+            )
         elif kind == "TABLE_FUNCTION":
             function = node.get("function")
             name = function.get("function_name") if isinstance(function, dict) else None
