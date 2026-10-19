@@ -10,7 +10,7 @@ The point of this project is **process, learning and conceptual ownership** as m
 
 # Current status
 
-**Iteration 1, milestone 2 (Database Intelligence & SQL Safety): complete.** Next is milestone 3 (LLM Integration & End-to-End Pipeline). Update this line whenever a milestone is finished.
+**Iteration 1, milestone 3 (LLM Integration & End-to-End Pipeline): complete.** Next is milestone 4 (Minimal Application Interface). Update this line whenever a milestone is finished.
 
 Do not implement anything from a later step or iteration unless I ask for it explicitly.
 
@@ -81,10 +81,20 @@ Known semantic traps, every one verified against the real data — the numbers a
 # Workflow (substantial tasks)
 
 1. Read the relevant files and the matching section of `docs/implementation_plan.md`.
-2. Explain the proposed change and its main tradeoffs **before writing code**. When there are real architectural alternatives, present them and let me choose.
-3. Implement the simplest version that meets the current step.
-4. Add or run the tests.
-5. Review the result critically. State the assumptions made, the remaining failure modes and anything still uncertain.
+2. **Review the planned changes first and propose settings, before writing code.** State:
+   - which files will change and what the new contracts are;
+   - **the Claude Code model and effort** the task warrants, and why — design-heavy
+     steps and anything safety-related earn Opus; mechanical substeps of a shape
+     we already agreed on do not. Say when a cheaper setting would do, and say
+     when you think the current setting is wrong in either direction.
+   - **for any code that calls an LLM**: the exact model id, `effort`, thinking
+     mode, output contract and `max_tokens`, with the cost per call. Never carry
+     these over from memory — read the `claude-api` skill and quote it. Model
+     behaviour changes faster than this file does.
+3. Explain the main tradeoffs. When there are real architectural alternatives, present them and let me choose.
+4. Implement the simplest version that meets the current step.
+5. Add or run the tests.
+6. Review the result critically. State the assumptions made, the remaining failure modes and anything still uncertain.
 
 Claude is a coding partner, not the decision maker. Challenge my choices when they look wrong. I stay the conceptual owner of the codebase.
 
@@ -110,6 +120,7 @@ Python 3.14 is managed with `uv`.
 uv sync                                  # install dependencies
 uv run pytest                            # unit tests: offline, fixture data, fast
 uv run pytest -m integration             # integration tests: needs the real CSVs in data/
+uv run --env-file .env pytest -m integration   # ... plus real model calls (~$0.01 each)
 uv run python -c "from pathlib import Path; from twyd.ingest import ingest; print(ingest(Path('data'), Path('db/olist.duckdb')))"
 ```
 

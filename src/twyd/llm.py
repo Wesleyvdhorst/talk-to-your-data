@@ -1,0 +1,134 @@
+"""The two LLM calls, and the only file that knows the model provider.
+
+Call #1 turns a question plus schema context into SQL. Call #2 turns a
+question, its SQL and the result into prose. Neither executes SQL, validates
+it, or opens a database: the pipeline does that between them.
+
+Settings are module constants rather than parameters, because every one of
+them is a decision worth defending rather than a knob to twiddle:
+
+- claude-sonnet-5-5: the model the assignment offers a key for. $2/$10 per
+  MTok, so a question costs about $0.01 end to end.
+- No temperature. Sonnet 5.5 rejects non-default sampling values with a 400,
+  so the usual `temperature=0` for text-to-SQL is not available. Determinism
+  comes from the output schema and a narrow prompt instead.
+- Thinking is left adaptive (the parameter is omitted). It cannot be disabled
+  on this model; effort is the only control, and its default of `high` is more
+  than either of these calls needs.
+- Structured output rather than a forced tool call: this model rejects
+  tool_choice "any"/"tool" with a 400, and assistant prefill too, so the two
+  usual ways to coerce bare SQL out of a model are both gone.
+"""
+
+import json
+from typing import Any, Protocol
+
+import anthropic
+
+MODEL = "claude-sonnet-5-5"
+SQL_EFFORT = "medium"  # guesses until milestone 5 measures them
+ANSWER_EFFORT = "low"
+MAX_TOKENS = 1024
+
+# One required field, no extras. additionalProperties=False is what makes the
+# response shape a guarantee rather than a hope.
+_SQL_FORMAT = {
+    "type": "json_schema",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "sql": {"type": "string", "description": "a single DuckDB SELECT query"}
+        },
+        "required": ["sql"],
+        "additionalProperties": False,
+    },
+}
+
+_SQL_SYSTEM = """\
+You translate questions about an Olist e-commerce database into DuckDB SQL.
+
+Rules:
+- Return exactly one SELECT (a leading WITH is fine). No semicolons, no second
+  statement, no DDL, no writes.
+- Read only the tables in the schema below. No table functions, no file paths.
+- Obey the NOTE and JOIN RULES lines in the schema. They record measured
+  properties of this data, not style preferences; ignoring one gives a
+  confidently wrong number.
+- Prefer explicit column lists over SELECT *.
+- If the question needs a column that does not exist, write the closest query
+  the schema does support rather than inventing a column.
+
+Schema:
+{schema_context}"""
+
+_ANSWER_SYSTEM = """\
+You explain the result of a database query to the person who asked the
+question. Two or three sentences, no preamble, no markdown headings.
+
+- Use only numbers that appear in the result. Never estimate, extrapolate or
+  add context the result does not contain.
+- If the result is empty, say that nothing matched, and do not guess why.
+- If the result was truncated, say the answer covers the rows shown.
+- Mention a caveat only when the SQL makes one real: a filter that excludes
+  rows, or a join that could duplicate them."""
+
+
+class _Client(Protocol):
+    """What this module needs from a client. Lets tests pass a stub."""
+
+    messages: Any
+
+
+def _text(response: Any) -> str:
+    """The first text block. Raises if the response has none, rather than
+    returning an empty string that would look like a model with nothing to say.
+    """
+    for block in response.content:
+        if block.type == "text":
+            return block.text
+    raise ValueError(f"no text block in response: stop_reason={response.stop_reason!r}")
+
+
+def generate_sql(
+    question: str, schema_context: str, client: _Client | None = None
+) -> str:
+    """Return the SQL the model proposes. It is untrusted until validated."""
+    client = client or anthropic.Anthropic()
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=MAX_TOKENS,
+        output_config={"effort": SQL_EFFORT, "format": _SQL_FORMAT},
+        system=_SQL_SYSTEM.format(schema_context=schema_context),
+        messages=[{"role": "user", "content": question}],
+    )
+    # The schema guarantees the shape, so a KeyError or JSONDecodeError here is
+    # a real anomaly and is left to propagate.
+    return json.loads(_text(response))["sql"]
+
+
+def generate_answer(
+    question: str,
+    sql: str,
+    columns: list[str],
+    rows: list[tuple[Any, ...]],
+    truncated: bool = False,
+    client: _Client | None = None,
+) -> str:
+    """Turn a result into prose. Takes the result's parts, not a QueryResult,
+    so this module stays independent of the database layer.
+    """
+    client = client or anthropic.Anthropic()
+    result = {"columns": columns, "rows": [list(row) for row in rows]}
+    content = (
+        f"Question: {question}\n\nSQL:\n{sql}\n\n"
+        f"Result ({len(rows)} rows{', truncated' if truncated else ''}):\n"
+        f"{json.dumps(result, default=str)}"
+    )
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=MAX_TOKENS,
+        output_config={"effort": ANSWER_EFFORT},
+        system=_ANSWER_SYSTEM,
+        messages=[{"role": "user", "content": content}],
+    )
+    return _text(response)
