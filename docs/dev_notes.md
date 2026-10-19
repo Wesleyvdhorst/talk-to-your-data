@@ -110,3 +110,123 @@ documented rather than assumed closed.
 different ways (can it write the database?) and none asked the adjacent one
 (can it touch the machine?). Breadth of threat model beats number of
 assertions. Thirty passing tests gave false confidence.
+
+## Milestone 2 — Database Intelligence & SQL Safety
+
+**Attempted:** the schema context that goes into the prompt, a validator for
+untrusted model-generated SQL, and cost bounds on query execution.
+
+**Where AI helped:** it found that DuckDB already ships what the validator
+needs — `duckdb.extract_statements()` returns one `StatementType` per
+statement, which is real parsing rather than keyword matching, and no new
+dependency. It also established that DuckDB has *no* statement-timeout setting
+(only `memory_limit`), which decided the timeout design for me.
+
+**Decisions I made:**
+
+- All nine tables go into the context every time (~4.3k chars). Per-question
+  table selection is an optimisation with no observed problem, and it risks
+  dropping a table the question needed.
+- The cost bound lives in `db.py`, not the pipeline. Defense belongs at the
+  layer that executes.
+- Semantics as a Python dict in `schema.py` rather than a Markdown file read at
+  runtime: one less file, no I/O, diffable next to the code that uses it. The
+  tradeoff is prose living in Python.
+
+**What failed:** the first row cap wrapped the query as
+`SELECT * FROM (<sql>) LIMIT n+1`. It rewrote the model's SQL — so error
+positions pointed at text the model never wrote — and it broke the two existing
+tests that document engine behaviour (`SET threads = 2` and
+`SELECT 1; SELECT 2` both became syntax errors inside a subquery). Replaced
+with `result.fetchmany(max_rows + 1)`, which streams: the cap applies without
+materialising the whole result and without touching the SQL.
+
+**Two surprises, both now pinned by tests:**
+
+- DuckDB parses `DESCRIBE`, `SHOW TABLES` and `PRAGMA database_list` as
+  `SELECT`. They are read-only and return a result set, so allowing them is
+  correct — and the side-effecting spellings (`PRAGMA threads = 4`,
+  `PRAGMA enable_external_access = true`) parse as `SET` and are rejected. The
+  parse type, not the keyword, is what separates them.
+- `statements[0].type is duckdb.StatementType.SELECT` is *always false*. The
+  pybind11 enum members are not interned singletons, so identity fails while
+  `==` works. Every allowed query was being rejected with the message "this is
+  a SELECT statement", which is the kind of error that reads as a logic bug in
+  the test rather than in the comparison operator.
+
+**Learned:** classifying SQL by parse type rather than by keyword is both
+shorter and stronger — `/* SELECT */ CREATE TABLE evil AS SELECT * FROM orders`
+is rejected as a CREATE without any string inspection. And a row cap is not a
+cost bound: `SELECT count(*)` over a cross join returns one row after counting
+a trillion, which is why the timeout exists as well.
+
+**Known rough edges:** the trap numbers in `TABLE_NOTES` are hand-written
+real-data facts, so against the small fixture database the notes and the
+introspected row counts disagree. `max_rows=1000` and 30 seconds are guesses,
+not measurements. Nothing calls `validate()` yet — wiring it in front of
+execution is milestone 3.
+
+### Post-review addendum: the function denylist was the wrong shape
+
+An automated security review flagged `_FORBIDDEN_FUNCTIONS` in `sql_guard.py`
+as an incomplete denylist. I went looking for a bypass and found one
+immediately:
+
+```sql
+SELECT * FROM 'secrets.csv'
+```
+
+No function name appears anywhere in that query. DuckDB resolves a bare string
+in `FROM` to a file via its replacement scans, and the parse tree calls it a
+`BASE_TABLE` named `secrets.csv`. A list of function names cannot see it, and
+neither could a longer list.
+
+**Fix:** the second layer is now an allowlist built from the parse tree, not a
+denylist of names. `json_serialize_sql` gives the tree (parsed, never
+executed); the walk collects every `BASE_TABLE`, every `TABLE_FUNCTION` and
+every CTE name, then rejects any table that is not one of the nine ingested
+tables and any table function at all. The allowlist comes from
+`ingest.TABLES`, so it cannot drift from what was actually loaded.
+
+Consequences I accepted:
+
+- `PRAGMA database_list` is now rejected. It parses as `SELECT`, but the
+  serialiser rewrites it into a `pragma_database_list()` reference. No question
+  about the data needs it.
+- Table functions like `range()` are rejected too. Analytical queries over
+  these nine tables do not need them, and "no table functions" is a rule I can
+  state in one sentence.
+- SQL the serialiser cannot represent is rejected rather than passed through.
+
+**The lesson, and it is the same one as milestone 1's addendum:** my denylist
+was enumerating the attacks I had thought of. The allowlist enumerates what the
+feature actually needs, which is nine table names. Nine is a number I can
+check; the set of ways to name a file is not.
+
+A second automated review then flagged the CTE handling in that same walk: CTE
+names are collected into one flat set, so a CTE defined in one subquery excuses
+that name anywhere in the statement. I tested the obvious exploit before
+changing anything:
+
+```sql
+WITH "secrets.csv" AS (SELECT 1 AS x) SELECT * FROM 'secrets.csv'
+-- passed the validator; DuckDB returned (1,) - the CTE, not the file
+```
+
+So the bypass gets past the validator but reads nothing: the CTE shadows the
+replacement scan. Not a leak, but it depends on DuckDB's name-resolution order,
+which is not a thing I want a safety property resting on. Two cheap rules
+instead of a scope stack: a CTE name must be a plain identifier
+(`^[A-Za-z_][A-Za-z0-9_]*$`), and a catalog- or schema-qualified reference is
+never excused by a CTE name, since a CTE can carry neither. `main.orders` still
+works.
+
+The flat-set shortcut is still there, marked with a `ponytail:` comment naming
+the ceiling: an out-of-scope name fails to bind in the engine anyway, and a
+file-like name can no longer be a CTE. A scope stack goes in only if CTE names
+ever stop being plain identifiers.
+
+**Worth noting about the process:** the first review was right and I had
+argued, in writing, that the denylist was "deliberately redundant". The second
+review was right about the mechanism and wrong about the impact. Testing the
+exploit took two minutes and was the only way to tell those two apart.
