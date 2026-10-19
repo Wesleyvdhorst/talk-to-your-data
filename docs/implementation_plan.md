@@ -10,9 +10,12 @@ The assignment at `docs/requirements.txt` is authoritative. Work on **one milest
 ## Current progress
 
 - **Active product iteration:** 1 — Core Product
-- **Active implementation milestone:** 1 — Data Foundation & Database
-- **Status:** Not yet completed; confirm repository/environment state before implementing.
-- **Next gate:** Demonstrate successful, reproducible ingestion and manual SQL querying.
+- **Active implementation milestone:** 2 — Database Intelligence & SQL Safety
+- **Status:** Milestone 1 complete. `uv` project, ingestion of all nine Olist
+  tables into DuckDB, a read-only query layer, 30 passing tests, and a measured
+  data model in `docs/data_model.md`.
+- **Next gate:** A schema/semantic context builder testable without an LLM, and
+  a SQL validator that rejects everything but a single read-only query.
 
 Update this section upon completion of a milestone. Record implementation decisions in `docs/dev_notes.md`.
 
@@ -116,7 +119,7 @@ A runnable Python natural-language → SQL → DuckDB → explanation pipeline, 
 
 ### Deliverable / done when
 
-A locally runnable, interview-demonstrable UI. No elaborate dashboard, authentication, or deployment work unless explicitly required.
+A locally runnable, demonstrable UI. No elaborate dashboard, authentication, or deployment work unless explicitly required.
 
 ## Milestone 5 — Evaluation & Baseline Stabilization
 

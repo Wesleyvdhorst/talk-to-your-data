@@ -10,13 +10,13 @@ The point of this project is **process, learning and conceptual ownership** as m
 
 # Current status
 
-**Iteration 1, step 1A: repository and environment setup.** Update this line whenever a substep is finished.
+**Iteration 1, milestone 1 (Data Foundation & Database): complete.** Next is milestone 2 (Database Intelligence & SQL Safety). Update this line whenever a milestone is finished.
 
 Do not implement anything from a later step or iteration unless I ask for it explicitly.
 
 # Iterations
 
-1. **Core product.** Question → schema context → SQL generation → validation → DuckDB execution → answer generation. Steps 1A–1I are in the plan.
+1. **Core product.** Question → schema context → SQL generation → validation → DuckDB execution → answer generation. Split into five implementation milestones in the plan.
 2. **Robustness.** Classify questions as ANSWERABLE, AMBIGUOUS or UNSUPPORTED. Ask for clarification when needed. Allow at most one SQL repair attempt. Capture inspectable pipeline artifacts. Build a fixed eval set.
 3. **Richer data understanding.** Route questions to SQL_ONLY, REVIEW_TEXT or HYBRID. Add semantic search over `review_comment_message`. Add a bounded agent loop (3–4 tool steps at most) only if a fixed pipeline proves insufficient.
 
@@ -40,14 +40,17 @@ Each component is separate, has an explicit input/output contract and can be tes
 # Data
 
 - The raw CSVs are assumed to be already present in `data/`. They are **read-only**, are never committed (~120 MB) and obtaining them is a manual step outside the application.
-- The minimum useful set is `orders`, `order_reviews` and customers (`olist_customers_dataset.csv`). Add other tables only when they enable useful questions.
+- All nine tables are ingested. `docs/data_model.md` records the measured grain, keys, null rates and cardinalities for each.
 
-Known semantic traps. Verify these during step 1B and encode them in the schema context:
+Known semantic traps, every one verified against the real data — the numbers and the queries behind them are in `docs/data_model.md` and asserted in `tests/test_real_data.py`. Encode them in the schema context (milestone 2):
 
-- `customers.customer_id` is unique **per order**. `customer_unique_id` identifies the real person. "How many customers" almost always means `COUNT(DISTINCT customer_unique_id)`.
-- Some orders have more than one review, and an order can have several items and payments. Joins can therefore duplicate rows and inflate counts and averages. Aggregate before joining, or use DISTINCT on purpose.
-- Delivery timestamps are null for undelivered orders. "Late" means `order_delivered_customer_date > order_estimated_delivery_date`.
-- Review text is in Portuguese.
+- `customers.customer_id` is unique **per order**. `customer_unique_id` identifies the real person (99,441 vs 96,096). "How many customers" almost always means `COUNT(DISTINCT customer_unique_id)`.
+- `order_reviews.review_id` is **not unique** and is not a primary key: 789 values recur against different orders, and 547 orders carry more than one review.
+- An order can have up to 21 items and 29 payment lines. Joins duplicate rows and skew averages — measurably, not theoretically. Aggregate before joining, or use DISTINCT on purpose.
+- 768 orders have no review, 775 no items, 1 no payment. An inner join silently drops them.
+- Delivery timestamps are null for undelivered orders (2,965). "Late" means `order_delivered_customer_date > order_estimated_delivery_date` (7,827 orders). 8 orders are marked `delivered` with no delivery date — trust the timestamp, not the status.
+- Review text is in Portuguese and only ~41% of reviews have a message at all.
+- `geolocation` has 1,000,163 rows for 19,015 zip prefixes. Joining it on zip multiplies rows ~53x; aggregate it first.
 
 # Rules
 
@@ -87,7 +90,18 @@ and its subagents are covered by the no-Agent-tool rule.
 
 # Commands
 
-Python 3.14 is managed with `uv`. Project dependencies and the test runner have not been set up yet (that is step 1A). Add the real commands here once they exist.
+Python 3.14 is managed with `uv`.
+
+```bash
+uv sync                                  # install dependencies
+uv run pytest                            # unit tests: offline, fixture data, fast
+uv run pytest -m integration             # integration tests: needs the real CSVs in data/
+uv run python -c "from pathlib import Path; from twyd.ingest import ingest; print(ingest(Path('data'), Path('db/olist.duckdb')))"
+```
+
+The DuckDB file is built at `db/olist.duckdb` and is gitignored. `data/` is
+never written to. Re-running ingestion replaces every table, so it is safe to
+delete `db/` and start over.
 
 # Development notes
 
