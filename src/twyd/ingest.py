@@ -35,6 +35,9 @@ def ingest(data_dir: Path, db_path: Path) -> dict[str, int]:
         raise FileNotFoundError(f"missing CSV files: {', '.join(sorted(missing))}")
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    # Unlike db.connect(), this connection must reach the filesystem: it reads
+    # the CSVs and writes the database. Safe because the SQL here is fixed and
+    # the table names come from TABLES, never from user or model input.
     counts = {}
     with duckdb.connect(db_path) as conn:
         for table, path in paths.items():

@@ -58,7 +58,16 @@ Known semantic traps, every one verified against the real data — the numbers a
 - **Dependencies.** Explain why before adding one, and prefer what is already installed or the stdlib.
 - **Deterministic before LLM.** Never use an LLM for a check that code can do (empty input, keyword blocklists, row counts and so on).
 - **No hidden errors.** Never swallow exceptions or turn a failure into an empty result. Errors must stay visible to higher layers.
-- **Read-only SQL, enforced twice.** The validator rejects anything that isn't a single SELECT/WITH, and execution also uses a read-only DuckDB connection.
+- **Read-only SQL, enforced twice.** Two independent layers:
+  1. *Engine* — `db.connect()` opens DuckDB with `read_only=True` **and**
+     `enable_external_access=false`. The first blocks database writes; the
+     second blocks host access, which `read_only` alone does **not**: on a
+     plain read-only connection `COPY ... TO` writes a real file and
+     `read_csv('/etc/passwd')` reads one. Verified in `tests/test_db.py`.
+  2. *Validator* (milestone 2) — rejects anything that isn't a single
+     read-only SELECT/WITH. It must reject **multi-statement** SQL, which the
+     engine cannot: `SELECT 1; SELECT 2` runs and returns only the last
+     result. That gap is pinned by a test so it stays visible.
 - **Bounded loops.** Every retry, repair or agent loop has a hard maximum.
 - **Small context.** Send prompts concise, relevant schema context, not the whole database description.
 - **Secrets.** API keys come from environment variables and are never committed or printed.

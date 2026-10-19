@@ -23,11 +23,19 @@ class QueryResult:
         return len(self.rows)
 
 
+# read_only blocks writes to the database. It does NOT block access to the host
+# filesystem: on a plain read-only connection, COPY ... TO writes a file and
+# read_csv('/etc/passwd') reads one. enable_external_access closes that, along
+# with ATTACH and INSTALL. Both are engine guarantees; the milestone-2 validator
+# is the second, independent layer.
+_CONFIG = {"enable_external_access": "false"}
+
+
 def connect(db_path: Path) -> duckdb.DuckDBPyConnection:
-    """Open a read-only connection. Writes fail at the engine, not just in review."""
+    """Open a connection that can neither write the database nor touch the host."""
     if not db_path.is_file():
         raise FileNotFoundError(f"database not found: {db_path}. Run ingest() first.")
-    return duckdb.connect(db_path, read_only=True)
+    return duckdb.connect(db_path, read_only=True, config=_CONFIG)
 
 
 def run_query(conn: duckdb.DuckDBPyConnection, sql: str) -> QueryResult:
@@ -38,5 +46,7 @@ def run_query(conn: duckdb.DuckDBPyConnection, sql: str) -> QueryResult:
     """
     result = conn.sql(sql)
     if result is None:
-        raise ValueError(f"query returned no result set: {sql!r}")
+        # The statement ran but is not a query (e.g. SET). Not a rejection:
+        # anything genuinely unsafe raises from DuckDB before reaching here.
+        raise ValueError(f"not a query, it produced no result set: {sql!r}")
     return QueryResult(columns=list(result.columns), rows=result.fetchall())

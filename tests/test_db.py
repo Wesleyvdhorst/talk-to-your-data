@@ -122,3 +122,46 @@ def test_late_delivery_excludes_undelivered_orders(conn):
         conn, "SELECT count(*) FROM orders WHERE order_delivered_customer_date IS NULL"
     )
     assert undelivered.rows == [(1,)]
+
+
+# --- Host access. A read-only connection alone does NOT block these: on a
+# --- plain duckdb.connect(read_only=True), COPY writes a real file and
+# --- read_csv reads any path. enable_external_access in connect() is what
+# --- closes them, so these tests guard that config, not DuckDB's defaults.
+
+
+def test_cannot_read_an_arbitrary_host_file(conn):
+    with pytest.raises(duckdb.Error, match="Permission"):
+        run_query(conn, "SELECT * FROM read_csv('/etc/passwd')")
+
+
+def test_copy_to_file_is_blocked_and_writes_nothing(conn, tmp_path):
+    target = tmp_path / "leak.csv"
+    with pytest.raises(duckdb.Error, match="Permission"):
+        run_query(conn, f"COPY orders TO '{target}'")
+    assert not target.exists()
+
+
+def test_cannot_install_an_extension(conn):
+    with pytest.raises(duckdb.Error, match="Permission"):
+        run_query(conn, "INSTALL httpfs")
+
+
+def test_cannot_attach_another_database(conn, tmp_path):
+    with pytest.raises(duckdb.Error, match="Permission"):
+        run_query(conn, f"ATTACH '{tmp_path / 'other.duckdb'}'")
+
+
+def test_a_non_query_statement_raises_rather_than_returning_empty(conn):
+    with pytest.raises(ValueError, match="not a query"):
+        run_query(conn, "SET threads = 2")
+
+
+def test_multiple_statements_are_NOT_blocked_here(conn):
+    """Documents a known gap: the engine runs both and returns only the last.
+
+    Nothing at this layer can reject it - it is a syntactic property, not a
+    permission. Milestone 2's validator must reject multi-statement SQL, and
+    this test is here so the gap is visible rather than assumed closed.
+    """
+    assert run_query(conn, "SELECT 1; SELECT 2").rows == [(2,)]

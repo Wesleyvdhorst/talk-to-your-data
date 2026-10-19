@@ -73,3 +73,40 @@ incomplete)
 for one prompt. Does the schema context get selected per question, or sent
 whole and trimmed later? I'd rather not build the selector before I've seen it
 actually fail.
+
+### Post-review addendum: the read-only connection was not enough
+
+Testing queries by hand after the milestone-1 commit found a real hole that
+all 30 tests had missed, because every test only asked whether *database*
+writes were blocked.
+
+On a plain `duckdb.connect(..., read_only=True)`:
+
+- `COPY orders TO '/tmp/leak.csv'` **wrote a 17 MB file to disk.**
+- `SELECT * FROM read_csv('/etc/passwd')` **returned 141 rows of the host's
+  password file.**
+- `INSTALL httpfs` downloaded and installed an extension.
+
+Worse, `run_query` reported the first two as `"query returned no result set"`,
+which reads like a rejection and wasn't one. A misleading error is worse than
+no check, because it stops you looking.
+
+`read_only=True` protects the *database*. It says nothing about the *host*.
+I had conflated the two, and the commit message I wrote ("writes fail at the
+engine") was true only for the narrow meaning of "write".
+
+**Fix:** one config flag — `enable_external_access=false` — closes file reads,
+file writes, `ATTACH` and `INSTALL`, all at the engine. Six new tests pin it,
+written to fail if the flag is ever removed.
+
+**Not fixed, deliberately:** `SELECT 1; SELECT 2` still runs and returns only
+the last result. No connection setting rejects it, because it's a syntactic
+property rather than a permission. That is milestone 2's validator's job, and
+there is now a test named `test_multiple_statements_are_NOT_blocked_here`
+asserting the current (wrong-for-production) behaviour, so the gap is
+documented rather than assumed closed.
+
+**The lesson worth presenting:** my tests all asked the same question in five
+different ways (can it write the database?) and none asked the adjacent one
+(can it touch the machine?). Breadth of threat model beats number of
+assertions. Thirty passing tests gave false confidence.
