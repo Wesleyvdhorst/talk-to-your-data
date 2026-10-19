@@ -17,7 +17,9 @@ uv run --env-file .env streamlit run src/twyd/app.py
 
 ```
 question
-  -> classify            Jev, three labels; UNSUPPORTED or AMBIGUOUS ends here
+  -> classify            Jev, three labels
+  -> clarify             if AMBIGUOUS: LLM call asking which reading, turn ends
+                         if UNSUPPORTED: fixed scope message, turn ends
   -> schema context      built from the live database + verified semantic notes
   -> generate_sql        LLM call #1, structured output, one {sql} field
   -> validate            parse tree: one SELECT, nine known tables, no table functions
@@ -27,9 +29,13 @@ question
 ```
 
 Three outcomes, kept apart: an **answer** (grounded in a result), a
-**message** (the pipeline declined - unsupported or underspecified, and no SQL
-was generated), or an **error** (something broke). A decline is an outcome,
-not a failure.
+**message** (the pipeline declined or asked back - unsupported or
+underspecified, and no SQL was generated), or an **error** (something broke).
+A decline is an outcome, not a failure.
+
+`Answer.trace` lists the stages the question actually passed through and is
+shown in the UI. It is derived from the fields above rather than recorded
+alongside them, so it cannot claim a stage that did not run.
 
 | Module | Responsibility |
 |---|---|

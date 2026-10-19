@@ -77,7 +77,11 @@ if question:
         # well enough to say it will not answer it. Its own caption, so the
         # distinction is visible rather than inferred from the wording.
         with st.container(border=True):
-            st.caption(f"No answer — classified {result.classification.label}")
+            st.caption(
+                "A question back to you"
+                if result.stage == "clarify"
+                else f"No answer — classified {result.classification.label}"
+            )
             st.text(result.message)
     elif result.ok:
         with st.container(border=True):
@@ -89,15 +93,12 @@ if question:
         st.error(f"Failed at the {result.stage} stage.")
         st.text(result.error)
 
-    if result.classification:
-        with st.expander("How the question was classified"):
-            c = result.classification
-            st.text(
-                f"{c.label}\n"
-                + (f"decided without a model call: {c.reason}\n" if c.reason else "")
-                + (f"confidence: {c.confidence:.2f}\n" if c.confidence is not None else "")
-                + (f"model: {c.model}" if c.model else "")
-            )
+    if result.trace:
+        # The pipeline's own account of where the question went, including
+        # where it stopped. Derived in pipeline.py, so it cannot claim a stage
+        # that did not run.
+        with st.expander("Pipeline"):
+            st.text("\n".join(f"{stage:16} {detail}" for stage, detail in result.trace))
 
     if result.sql:
         with st.expander("SQL", expanded=not result.ok):

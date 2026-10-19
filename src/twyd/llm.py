@@ -31,7 +31,17 @@ import anthropic
 MODEL = "claude-sonnet-5-5"
 SQL_EFFORT = "medium"  # guesses until milestone 5 measures them
 ANSWER_EFFORT = "low"
+CLARIFY_EFFORT = "low"
 MAX_TOKENS = 1024
+# A clarification is one question back to the user. Two sentences at the most,
+# so the cap is here to make a runaway visible rather than to pay for it.
+CLARIFY_MAX_TOKENS = 256
+# Thinking off for this one call: there is nothing to reason about beyond
+# reading the schema and naming the readings it supports, and a clarification
+# that varies run to run is itself a kind of ambiguity. `between_tools` is the
+# only way to turn thinking off on this model, and it is accepted only at
+# effort `high` or below, with no other field alongside it.
+_NO_THINKING = {"type": "between_tools"}
 
 # One required field, no extras. additionalProperties=False is what makes the
 # response shape a guarantee rather than a hope.
@@ -46,6 +56,37 @@ _SQL_FORMAT = {
         "additionalProperties": False,
     },
 }
+
+_CLARIFY_FORMAT = {
+    "type": "json_schema",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "question": {
+                "type": "string",
+                "description": "one short question back to the user",
+            }
+        },
+        "required": ["question"],
+        "additionalProperties": False,
+    },
+}
+
+_CLARIFY_SYSTEM = """\
+A user asked a question of an Olist e-commerce database. It has more than one
+reasonable reading, and the readings give different answers. Ask them which
+one they mean.
+
+- Name the readings, two or three of them, and nothing else. "Best" is
+  revenue, units sold, or review score; "recently" is a month, a quarter, or
+  the whole period.
+- Offer only readings the schema below supports. If a reading would need a
+  column that does not exist, leave it out.
+- Do not pick one, do not answer the question, and do not apologise.
+- One or two sentences, no preamble, no markdown.
+
+Schema:
+{schema_context}"""
 
 _SQL_SYSTEM = """\
 You translate questions about an Olist e-commerce database into DuckDB SQL.
@@ -160,3 +201,23 @@ def generate_answer(
         messages=[{"role": "user", "content": content}],
     )
     return _text(response)
+
+
+def clarify(question: str, schema_context: str, client: _Client | None = None) -> str:
+    """Return one question to ask back about an underspecified question.
+
+    Reached only when the classifier said AMBIGUOUS. The classifier decides
+    *that* a question is underspecified; this decides *what to ask about it*,
+    which needs the schema and a sentence of prose - neither of which a
+    decision model produces.
+    """
+    client = client or anthropic.Anthropic()
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=CLARIFY_MAX_TOKENS,
+        thinking=_NO_THINKING,
+        output_config={"effort": CLARIFY_EFFORT, "format": _CLARIFY_FORMAT},
+        system=_CLARIFY_SYSTEM.format(schema_context=schema_context),
+        messages=[{"role": "user", "content": question}],
+    )
+    return json.loads(_text(response))["question"]

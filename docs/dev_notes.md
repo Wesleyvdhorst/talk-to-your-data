@@ -539,3 +539,48 @@ it.
 `SystemOneResponse`/`ChoiceAnswer` types instead of duck-typing them. If
 TypeSafe changes the shape of an answer, our offline tests fail rather than
 production.
+
+## Milestone 8 — asking back, and a trace that cannot lie
+
+**Attempted:** turn the AMBIGUOUS label into an actual question, and make the
+pipeline inspectable.
+
+**The division of labour I settled on.** Jev decides *that* a question is
+underspecified; a Claude call decides *what to ask about it*. The alternative
+I considered was a second fixed-taxonomy Jev question (metric / time range /
+entity undefined) templated into prose, which is cheaper and much worse: "By
+'best' do you mean highest revenue (sum of item price), most units sold (count
+of order items), or highest average review score?" names columns that exist,
+and a template cannot.
+
+**A setting I had claimed was impossible, now used.** The clarify call runs
+with `thinking={"type": "between_tools"}` - thinking off, which milestone 6
+discovered was available on this model after my own code comment said it was
+not. Verified on a real call before relying on it. Naming readings needs no
+reasoning, and a clarification that varies between runs is itself a kind of
+ambiguity.
+
+**The trace is derived, not recorded.** `Answer.trace` reads the fields the
+pipeline already set and reports the stages from them. My first instinct was
+to append to a list as the pipeline went, which is a second source of truth
+about the same run - and the failure mode of that design is a trace that
+claims a stage ran when it did not. Deriving it means the trace cannot
+disagree with the outcome.
+
+**The mistake I made while verifying, which is the thing worth presenting.** I
+saw an answer say an average was "based on 7,662 late orders" and a result
+with one column and one value, and concluded I had found a fresh grounding
+defect of exactly the kind milestone 6 was supposed to close. I even wrote a
+prompt rule forbidding it. I had compared an answer from one run against the
+result of *another* run: the generated SQL differs between runs, and on the
+runs that mention 7,662 the model's own query returns it as a second column.
+The claim was grounded the whole time.
+
+Two lessons. The first is about verification: with a non-deterministic
+pipeline, an answer and a result have to come from the *same* call, and
+printing them separately invites exactly this error. The second is about
+process: I had added a rule to the prompt before confirming the defect, and
+the rule actively made good answers worse - the model started tacking "the
+result also contains a column, late_orders_with_reviews, with a value of
+7,662" onto otherwise clean prose to satisfy it. It is reverted. No rule
+without evidence, including rules that look obviously safe.

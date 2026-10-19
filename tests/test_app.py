@@ -63,3 +63,11 @@ def test_a_declined_question_is_rendered_as_neither_an_answer_nor_an_error():
     assert "st.text(result.message)" in source
     # ...and it must come first, because a decline is also `ok`.
     assert source.index("if result.declined:") < source.index("elif result.ok:")
+
+
+def test_the_trace_is_rendered_from_the_pipeline_not_rebuilt_in_the_ui():
+    """The app must not assemble its own account of what happened; that is how
+    a UI ends up claiming a stage ran when it did not."""
+    source = (Path(__file__).parent.parent / "src" / "twyd" / "app.py").read_text()
+    assert "result.trace" in source
+    assert "st.expander(\"Pipeline\")" in source

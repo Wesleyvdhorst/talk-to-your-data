@@ -35,6 +35,18 @@ class _Messages:
         return _Response(self._replies.pop(0))
 
 
+class ClarifyingClient:
+    """Replies with a clarification question: the only Claude call an
+    AMBIGUOUS question makes."""
+
+    def __init__(self, question: str):
+        self.messages = _Messages([json.dumps({"question": question})])
+
+    @property
+    def call_count(self):
+        return len(self.messages.calls)
+
+
 class ScriptedClient:
     """Replies in order: the first call is SQL generation, the second prose."""
 
@@ -140,15 +152,29 @@ def test_an_unsupported_question_generates_no_sql_at_all(conn):
     assert result.ok
 
 
-def test_an_ambiguous_question_is_not_guessed_at(conn):
-    client = ScriptedClient("SELECT 1")
+def test_an_ambiguous_question_asks_instead_of_guessing(conn):
+    """The one Claude call an ambiguous question makes is the clarification.
+    No SQL is generated, so nothing is guessed at and nothing is executed."""
+    client = ClarifyingClient("Do you mean by revenue or by review score?")
     result = answer_question("what are the best products?", conn, client=client,
                              jev=StubJev("AMBIGUOUS"))
 
     assert result.declined
-    assert "more than one reading" in result.message
-    assert client.call_count == 0
+    assert result.stage == "clarify"
+    assert result.message == "Do you mean by revenue or by review score?"
     assert result.sql is None
+    assert result.result is None
+    assert client.call_count == 1  # the clarification, and nothing else
+
+
+def test_the_clarification_call_gets_the_schema_so_it_offers_real_readings(conn):
+    client = ClarifyingClient("by revenue or by units?")
+    answer_question("best products?", conn, client=client, jev=StubJev("AMBIGUOUS"))
+    call = client.messages.calls[0]
+    assert "TABLE order_items" in call["system"]
+    # Thinking off: a clarification that varies run to run is itself ambiguous.
+    assert call["thinking"] == {"type": "between_tools"}
+    assert call["output_config"]["format"]["schema"]["required"] == ["question"]
 
 
 def test_the_decline_message_explains_the_scope_rather_than_apologising(conn):
@@ -174,3 +200,53 @@ def test_classification_happens_before_sql_generation(conn, jev):
     client = ScriptedClient("SELECT count(*) AS n FROM orders")
     answer_question("how many orders?", conn, client=client, jev=jev)
     assert jev.questions == ["how many orders?"]
+
+
+# The trace: every stage the question passed through, derived from the fields
+# the pipeline already set. What matters is that it ends where the question
+# actually ended - a trace that claims a stage ran is worse than none.
+
+
+def test_the_trace_of_an_answered_question_lists_every_stage(conn, jev):
+    client = ScriptedClient("SELECT count(*) AS n FROM orders", "There are 4 orders.")
+    result = answer_question("how many orders?", conn, client=client, jev=jev)
+    assert [stage for stage, _ in result.trace] == [
+        "classify",
+        "generate_sql",
+        "validate",
+        "run_query",
+        "generate_answer",
+    ]
+    assert "ANSWERABLE" in dict(result.trace)["classify"]
+    assert dict(result.trace)["validate"] == "passed"
+    assert dict(result.trace)["run_query"] == "1 rows"
+
+
+def test_the_trace_stops_where_an_unsupported_question_stopped(conn):
+    client = ScriptedClient("SELECT 1")
+    result = answer_question("what will sales be next month?", conn, client=client,
+                             jev=StubJev("UNSUPPORTED"))
+    assert [stage for stage, _ in result.trace] == ["classify"]
+
+
+def test_the_trace_shows_a_clarification_as_its_own_stage(conn):
+    client = ClarifyingClient("by revenue or by units?")
+    result = answer_question("best products?", conn, client=client,
+                             jev=StubJev("AMBIGUOUS"))
+    assert [stage for stage, _ in result.trace] == ["classify", "clarify"]
+
+
+def test_the_trace_records_a_rejection_rather_than_claiming_the_query_ran(conn, jev):
+    client = ScriptedClient("DROP TABLE orders")
+    result = answer_question("delete everything", conn, client=client, jev=jev)
+    trace = dict(result.trace)
+    assert trace["validate"] == "rejected"
+    assert "run_query" not in trace
+
+
+def test_the_trace_says_a_deterministic_rejection_cost_nothing(conn):
+    """The classifier's pre-checks are the one place a stage has no model
+    behind it, and the trace has to say so."""
+    client = ScriptedClient("SELECT 1")
+    result = answer_question("!!!", conn, client=client, jev=StubJev())
+    assert "no model call" in dict(result.trace)["classify"]
