@@ -55,7 +55,8 @@ def answer_question(
     if not question or not question.strip():
         return Answer(question=question, error="the question is empty", stage="generate")
 
-    sql = generate_sql(question, schema_context(conn), client=client)
+    context = schema_context(conn)
+    sql = generate_sql(question, context, client=client)
 
     try:
         validate(sql)
@@ -73,6 +74,9 @@ def answer_question(
         result.columns,
         result.rows,
         truncated=result.truncated,
+        # The same context the SQL call got, so the answer can say what a
+        # column means rather than inferring it from the name.
+        schema_context=context,
         client=client,
     )
     return Answer(question=question, sql=sql, result=result, answer=answer)

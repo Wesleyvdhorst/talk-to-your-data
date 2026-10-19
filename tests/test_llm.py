@@ -115,3 +115,73 @@ def test_a_response_with_no_text_block_raises_rather_than_returning_empty():
     client = StubClient([StubBlock("", type="thinking")], stop_reason="refusal")
     with pytest.raises(ValueError, match="no text block"):
         generate_sql("q", "SCHEMA", client=client)
+
+
+# The two grounding defects recorded in docs/eval_results.md. Both were claims
+# ABOUT the result rather than values from it: a 20-row result described as 19
+# rows, and customer_unique_id explained as "distinct customer IDs". Neither
+# can be tested by asserting on prose, so these pin the inputs instead - the
+# row count is now a stated fact and the column meaning is now available.
+
+
+def test_the_row_count_is_stated_as_a_fact_not_left_to_the_model():
+    client = StubClient([StubBlock("ok")])
+    rows = [(i, f"p{i}") for i in range(20)]
+    generate_answer("best products", "SELECT 1", ["product_id", "name"], rows, client=client)
+    content = client.calls[0]["messages"][0]["content"]
+    assert "RESULT: 20 rows" in content
+    assert "2 columns (product_id, name)" in content
+    assert "complete" in content
+
+
+def test_one_row_and_one_column_are_not_pluralised():
+    client = StubClient([StubBlock("ok")])
+    generate_answer("q", "SELECT 1", ["n"], [(4,)], client=client)
+    assert "RESULT: 1 row, 1 column (n), complete" in client.calls[0]["messages"][0]["content"]
+
+
+def test_truncation_is_stated_as_more_rows_matched():
+    client = StubClient([StubBlock("ok")])
+    generate_answer("q", "SELECT 1", ["n"], [(1,)], truncated=True, client=client)
+    content = client.calls[0]["messages"][0]["content"]
+    assert "truncated at the row cap" in content
+    assert "complete" not in content
+
+
+def test_the_answer_call_gets_the_schema_so_it_can_say_what_a_column_means():
+    client = StubClient([StubBlock("ok")])
+    generate_answer(
+        "how many customers",
+        "SELECT count(DISTINCT customer_unique_id) AS n FROM customers",
+        ["n"],
+        [(96096,)],
+        schema_context="customer_unique_id identifies the real person",
+        client=client,
+    )
+    assert "customer_unique_id identifies the real person" in (
+        client.calls[0]["messages"][0]["content"]
+    )
+
+
+def test_the_schema_section_is_absent_when_no_schema_is_given():
+    """generate_answer stays usable without the database layer."""
+    client = StubClient([StubBlock("ok")])
+    generate_answer("q", "SELECT 1", ["n"], [(1,)], client=client)
+    assert "Schema" not in client.calls[0]["messages"][0]["content"]
+
+
+def test_the_answer_prompt_constrains_claims_about_the_result_not_only_numbers():
+    client = StubClient([StubBlock("ok")])
+    generate_answer("q", "SELECT 1", ["n"], [(1,)], client=client)
+    system = client.calls[0]["system"]
+    assert "must repeat the RESULT line" in system
+    assert "Do not count the rows" in system  # wrapped in the prompt source
+
+
+def test_the_prompt_does_not_invite_reciting_the_shape_of_a_single_value():
+    """The first version of the RESULT rule made every answer end with
+    "The result is 1 row, 1 column (n), complete." - grounded, and noise."""
+    client = StubClient([StubBlock("ok")])
+    generate_answer("q", "SELECT 1", ["n"], [(1,)], client=client)
+    assert "do not" in client.calls[0]["system"]
+    assert "recite the RESULT line back" in client.calls[0]["system"]
