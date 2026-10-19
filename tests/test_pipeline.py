@@ -10,7 +10,12 @@ import json
 import pytest
 
 from conftest import StubJev  # pytest puts tests/ on sys.path; it is not a package
-from twyd.pipeline import answer_question
+from twyd.pipeline import (
+    MAX_HISTORY_CHARS,
+    Turn,
+    answer_question,
+    history_block,
+)
 
 
 class _Blocks:
@@ -316,3 +321,98 @@ def test_rejected_sql_keeps_the_assumption_that_came_with_it(conn, jev):
 
     assert not result.ok
     assert result.assumption == "whatever it claimed"
+
+
+# Follow-up questions (milestone 12). History is this module's concern: the
+# type, the caps and the rendering all live here, and the layers underneath
+# receive a string.
+
+
+def test_history_renders_the_question_the_sql_and_the_clarification():
+    block = history_block(
+        [
+            Turn("how many orders in 2017?", sql="SELECT count(*) FROM orders"),
+            Turn("what are the best products?", asked="revenue or reviews?"),
+        ]
+    )
+    assert "how many orders in 2017?" in block
+    assert "SELECT count(*) FROM orders" in block
+    assert "revenue or reviews?" in block
+
+
+def test_history_never_carries_the_rows():
+    """A follow-up re-derives its scope by querying again. Pasting an earlier
+    result into a prompt would make the next answer evidence for nothing."""
+    assert Turn._fields == ("question", "sql", "asked")
+
+
+def test_no_history_renders_to_nothing():
+    assert history_block([]) == ""
+
+
+def test_only_the_last_three_turns_survive_the_turn_cap():
+    turns = [Turn(f"question {i}") for i in range(5)]
+    block = history_block(turns)
+    assert "question 0" not in block and "question 1" not in block
+    for kept in ("question 2", "question 3", "question 4"):
+        assert kept in block
+
+
+def test_the_character_cap_drops_the_oldest_first():
+    """Turns alone do not bound cost: three turns of 2,000-character SQL is a
+    different prompt from three of 300. The newest turn always survives - it
+    is the one a follow-up is about."""
+    turns = [Turn(f"question {i}", sql="SELECT " + "x" * 900) for i in range(3)]
+    block = history_block(turns)
+    assert len(block) <= MAX_HISTORY_CHARS
+    assert "question 2" in block
+    assert "question 0" not in block
+
+
+def test_a_single_oversized_turn_is_dropped_rather_than_truncated():
+    """Truncated SQL would be worse than none: the model would read a cut-off
+    query as the shape to follow."""
+    assert history_block([Turn("q", sql="SELECT " + "x" * MAX_HISTORY_CHARS)]) == ""
+
+
+def test_the_history_reaches_both_the_classifier_and_the_sql_call(conn, jev):
+    client = ScriptedClient("SELECT count(*) AS n FROM orders")
+    history = (Turn("how many orders in 2017?", sql="SELECT 1"),)
+    answer_question("and in 2018?", conn, client=client, jev=jev, history=history)
+
+    # Jev sees it as part of the state it classifies...
+    assert "how many orders in 2017?" in jev.questions[0]
+    assert "CURRENT QUESTION: and in 2018?" in jev.questions[0]
+    # ...and the SQL call as part of the user message.
+    sql_call = client.messages.calls[0]
+    assert "how many orders in 2017?" in sql_call["messages"][0]["content"]
+
+
+def test_an_answered_turn_becomes_the_turn_the_next_question_sees(conn, jev):
+    client = ScriptedClient("SELECT count(*) AS n FROM orders")
+    result = answer_question("how many orders", conn, client=client, jev=jev)
+
+    assert result.turn == Turn(
+        question="how many orders", sql="SELECT count(*) AS n FROM orders", asked=None
+    )
+
+
+def test_a_clarification_becomes_a_turn_that_records_what_was_asked(conn):
+    """The clarification flow and the follow-up flow are one mechanism: the
+    answer to a clarification is just the next turn."""
+    client = ClarifyingClient("By best do you mean revenue or reviews?")
+    result = answer_question(
+        "what are the best products?", conn, client=client, jev=StubJev("AMBIGUOUS")
+    )
+
+    assert result.turn.asked == "By best do you mean revenue or reviews?"
+    assert result.turn.sql is None
+
+
+def test_an_unsupported_turn_claims_no_question_was_asked_back(conn):
+    client = ScriptedClient("unused")
+    result = answer_question(
+        "what will sales be?", conn, client=client, jev=StubJev("UNSUPPORTED")
+    )
+
+    assert result.turn == Turn(question="what will sales be?", sql=None, asked=None)

@@ -15,11 +15,24 @@ APP = Path(__file__).parent.parent / "src" / "twyd" / "app.py"
 
 @pytest.fixture
 def app(monkeypatch, fixture_db):
-    """Point the app at the fixture database via the env var it reads."""
+    """Point the app at the fixture database via the env var it reads.
+
+    The connection the app opens is released afterwards. st.cache_resource is
+    process-wide and keyed on nothing, so without this the first app test to
+    submit a question leaves a connection open for the rest of the session -
+    and DuckDB refuses a second connection to the same file with a different
+    configuration, which is exactly what a test opening it with plain
+    duckdb.connect() does. It failed only in the full suite, never alone.
+    """
+    import gc
+
+    import streamlit as st
     from streamlit.testing.v1 import AppTest
 
     monkeypatch.setenv("TWYD_DB", str(fixture_db))
-    return AppTest.from_file(str(APP), default_timeout=30)
+    yield AppTest.from_file(str(APP), default_timeout=30)
+    st.cache_resource.clear()
+    gc.collect()  # drops the last reference, which closes the file
 
 
 def test_the_app_renders_with_no_question_and_no_model_call(app):
@@ -30,8 +43,10 @@ def test_the_app_renders_with_no_question_and_no_model_call(app):
     # A literal, so adding an example means looking at this test: every one of
     # them is a claim that the question works, which only a real run can say.
     assert len(app.button) == 11
-    assert app.text_input[0].value == ""
+    assert app.chat_input[0].value is None
     assert [h.value for h in app.subheader] == ["One number", "Bigger questions"]
+    # Nothing to replay yet, so no turn is rendered.
+    assert not app.chat_message
 
 
 def test_a_missing_database_is_reported_not_crashed(monkeypatch, tmp_path):
@@ -85,3 +100,77 @@ def test_the_assumption_is_shown_with_the_answer_and_not_as_markdown():
     # Inside the answer branch, after the answer itself.
     assert source.index("st.text(result.answer)") < source.index("st.text(result.assumption)")
     assert source.index("st.text(result.assumption)") < source.index("else:\n        # The stage")
+
+
+# Follow-up questions (milestone 12). The UI owns the transcript; the pipeline
+# owns what the model is allowed to see of it.
+
+
+@pytest.fixture
+def stub_pipeline(monkeypatch):
+    """Replace answer_question before the app imports it.
+
+    AppTest executes app.py inside run(), and app.py does `from
+    twyd.pipeline import answer_question` at that point, so patching the
+    pipeline module beforehand is what the from-import picks up. No model
+    call, no tokens, and the calls are recorded.
+    """
+    from twyd.pipeline import Answer
+
+    calls = []
+
+    def fake(question, conn, client=None, jev=None, history=()):
+        calls.append((question, tuple(history)))
+        return Answer(
+            question=question,
+            sql=f"SELECT '{len(calls)}' AS n",
+            answer=f"Answer {len(calls)}.",
+        )
+
+    monkeypatch.setattr("twyd.pipeline.answer_question", fake)
+    return calls
+
+
+def test_a_second_question_carries_the_first_turn_as_history(app, stub_pipeline):
+    app.run()
+    app.chat_input[0].set_value("how many orders are there?").run()
+    app.chat_input[0].set_value("and in 2018?").run()
+
+    first, second = stub_pipeline
+    assert first == ("how many orders are there?", ())
+    question, history = second
+    assert question == "and in 2018?"
+    # One earlier turn, carrying its question and the SQL that answered it -
+    # and no rows: the next query has to stand on its own result.
+    assert len(history) == 1
+    assert history[0].question == "how many orders are there?"
+    assert history[0].sql == "SELECT '1' AS n"
+    assert not hasattr(history[0], "result")
+
+
+def test_both_turns_stay_on_screen(app, stub_pipeline):
+    app.run()
+    app.chat_input[0].set_value("first question").run()
+    app.chat_input[0].set_value("second question").run()
+
+    shown = [element.value for element in app.text]
+    assert "first question" in shown and "Answer 1." in shown
+    assert "second question" in shown and "Answer 2." in shown
+
+
+def test_starting_a_new_conversation_drops_the_history(app, stub_pipeline):
+    app.run()
+    app.chat_input[0].set_value("first question").run()
+    [reset] = [b for b in app.button if "new conversation" in b.label.lower()]
+    reset.click().run()
+    app.chat_input[0].set_value("unrelated question").run()
+
+    assert stub_pipeline[-1] == ("unrelated question", ())
+
+
+def test_the_ui_keeps_no_second_account_of_the_conversation():
+    """The history sent to the model is derived from the answers themselves,
+    so it cannot drift from what actually ran - the same reason Answer.trace
+    is derived rather than recorded."""
+    source = (Path(__file__).parent.parent / "src" / "twyd" / "app.py").read_text()
+    assert "history=tuple(a.turn for a in st.session_state.answers)" in source

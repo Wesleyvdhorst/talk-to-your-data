@@ -282,3 +282,38 @@ def test_no_assumption_line_is_sent_when_the_question_determined_the_query():
     client = StubClient([StubBlock("ok")])
     generate_answer("q", "SELECT 1", ["n"], [(1,)], assumption="", client=client)
     assert "ASSUMPTION" not in client.calls[0]["messages"][0]["content"]
+
+
+# Where history goes, which is the security-relevant part (milestone 12).
+
+
+def test_history_goes_in_the_user_message_and_never_the_system_prompt():
+    """Two reasons, both deliberate. The system prompt is the stable prefix -
+    caching is a prefix match, so a per-turn string in it would invalidate the
+    schema context behind it on every question. And earlier turns are the
+    user's own text: in the system prompt they would carry operator authority,
+    which is how a question talks the rules out of a model.
+    """
+    client = sql_client("SELECT 1")
+    generate_sql("and in 2018?", "SCHEMA", client=client, history="EARLIER: 2017?")
+    call = client.calls[0]
+    assert "EARLIER: 2017?" in call["messages"][0]["content"]
+    assert "EARLIER: 2017?" not in call["system"]
+    # The current question is labelled, so there is no doubt which to answer.
+    assert "CURRENT QUESTION (write SQL for this one): and in 2018?" in (
+        call["messages"][0]["content"]
+    )
+
+
+def test_without_history_the_user_message_is_the_bare_question():
+    client = sql_client("SELECT 1")
+    generate_sql("how many orders?", "SCHEMA", client=client)
+    assert client.calls[0]["messages"] == [
+        {"role": "user", "content": "how many orders?"}
+    ]
+
+
+def test_the_sql_prompt_forbids_reusing_an_earlier_number():
+    client = sql_client("SELECT 1")
+    generate_sql("q", "SCHEMA", client=client)
+    assert "never quote a number from an earlier turn" in client.calls[0]["system"]

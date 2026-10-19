@@ -1,9 +1,9 @@
 # Evaluation set
 
-Eighteen questions. Twelve were written **before** the first iteration 1 run;
-six more (13–18) were written **before** the first run of this version, and
-questions 1–8 are untouched — they are the baseline iteration 2 is measured
-against.
+Twenty-one questions. Twelve were written **before** the first iteration 1
+run; six more (13–18) **before** the first iteration 2 run; three more
+(19–21) **before** the first run with follow-ups. Questions 1–8 are untouched
+— they are the baseline every later iteration is measured against.
 
 Every reference value is produced by SQL I wrote myself, independently of the
 model, and is recomputed at eval time rather than hard-coded — if the database
@@ -21,7 +21,7 @@ Three checks, each of which can fail on its own:
 | Check | Applies to | Passes when |
 |---|---|---|
 | **Label** | every question | the classifier returns the expected `ANSWERABLE` / `AMBIGUOUS` / `UNSUPPORTED` |
-| **Value** | the 10 questions with a reference query | the model's query returns the same value, within 0.005 |
+| **Value** | the 11 questions with a reference query | the model's query returns the same value, within 0.005 |
 | **Rows** | question 17 | the result has as many rows as the reference count |
 
 An `AMBIGUOUS` question has one extra condition: the pipeline must *ask*
@@ -60,7 +60,7 @@ zero is still an answer". It is graded here so that cannot regress silently.
 This is the deterministic half of the defect milestone 6 fixed, where a 20-row
 result was described as 19 rows. The row count is graded; the prose is read.
 
-## Graded on label alone (7)
+## Graded on label alone (8)
 
 These have no value to check: a declined question produces no SQL.
 
@@ -77,6 +77,25 @@ These have no value to check: a declined question produces no SQL.
 Questions 9–12 were record-only in iteration 1, which had no classifier to be
 right or wrong. They are graded now, and that is most of what iteration 2 adds
 to this set.
+
+## Follow-ups (3)
+
+New in iteration 3. Each needs conversation history to mean anything, which is
+the point: questions 19 and 20 carry a **prior turn** that is asked first,
+through the same pipeline, so the history under test is real rather than a
+hand-written transcript. Question 21 carries none.
+
+| # | Prior turn | Question | Graded on | Why |
+|---|---|---|---|---|
+| 19 | "How many orders were placed in 2017?" | "and in 2018?" | label + value | The plain follow-up: the previous question with one thing changed. The reference is a `count(*)` for 2018, so it is as deterministic as question 3 |
+| 20 | "What are the best products?" (which asks back) | "by revenue" | label only, must be ANSWERABLE | The clarification loop closing. Iteration 2's dead end: the app asked which reading and the user had no way to answer |
+| 21 | *(none)* | "and for late deliveries?" | label only, must be AMBIGUOUS | A follow-up with nothing to follow. Must ask rather than guess a measure |
+
+Question 20 is graded on its label alone on purpose. A reference value would
+grade which column the model chose to return — `product_id`, a category name,
+a top-10 list — and not whether the follow-up worked. If the clarification
+loop breaks, the label comes back `AMBIGUOUS` again and the question fails,
+which is exactly the signal wanted.
 
 ## What is deliberately not measured
 

@@ -112,14 +112,21 @@ def test_the_app_answers_a_question_end_to_end(monkeypatch):
     app_path = Path(__file__).parent.parent / "src" / "twyd" / "app.py"
     app = AppTest.from_file(str(app_path), default_timeout=120)
     app.run()
-    app.text_input[0].set_value("How many orders are there?").run()
+    app.chat_input[0].set_value("How many orders are there?").run()
 
     assert not app.exception
     rendered = " ".join(t.value for t in app.text)
     assert rendered, f"no answer rendered; errors={[e.value for e in app.error]}"
     assert "99,441" in rendered or "99441" in rendered
-    assert "FROM orders" in app.code[0].value.lower() or "from orders" in app.code[0].value.lower()
+    assert "from orders" in app.code[0].value.lower()
     assert app.dataframe  # the result table rendered
+
+    # And the follow-up, in the real UI with a real model: two words that mean
+    # nothing without the turn above them.
+    app.chat_input[0].set_value("and in 2018?").run()
+    assert not app.exception
+    rendered = " ".join(t.value for t in app.text)
+    assert "54,011" in rendered or "54011" in rendered, rendered
 
 
 def test_clarify_names_readings_and_answers_nothing(real_conn):
@@ -175,3 +182,27 @@ def test_the_assumption_is_prose_about_the_data_not_a_restatement_of_the_sql(rea
         keyword in lowered
         for keyword in ("select ", "group by", "left join", "inner join", "count(")
     ), f"restates the query instead of the choice: {assumption!r}"
+
+
+def test_a_clarification_can_be_answered_and_becomes_the_next_turn(real_conn):
+    """Iteration 2's dead end, closed. The app asked which reading was meant
+    and the user had no way to answer; now the answer is just the next turn.
+
+    Two real turns: an ambiguous question that must ask back, then a two-word
+    reply that only means anything with the first turn behind it.
+    """
+    first = answer_question("What are the best products?", real_conn)
+    assert first.declined and first.stage == "clarify", first.trace
+    assert "?" in first.message
+
+    second = answer_question("by revenue", real_conn, history=(first.turn,))
+    assert second.ok and second.sql, second.error or second.message
+    assert second.classification.label == "ANSWERABLE", second.classification
+    # The follow-up re-derives its own scope: revenue lives in order_items.
+    assert "order_items" in second.sql.lower()
+
+
+def test_a_follow_up_with_nothing_behind_it_asks_rather_than_guesses(real_conn):
+    answer = answer_question("and for late deliveries?", real_conn)
+    assert answer.declined, answer.answer
+    assert answer.classification.label == "AMBIGUOUS", answer.classification
