@@ -1,0 +1,4 @@
+"product_id","product_category_name","product_name_lenght","product_description_lenght","product_photos_qty","product_weight_g","product_length_cm","product_height_cm","product_width_cm"
+"prod_1","cama_mesa_banho",40,500,2,1000,30,10,20
+"prod_2","informatica_acessorios",35,300,1,500,20,5,15
+"prod_3",,,,,,,,

@@ -10,9 +10,12 @@ The assignment at `docs/requirements.txt` is authoritative. Work on **one milest
 ## Current progress
 
 - **Active product iteration:** 1 — Core Product
-- **Active implementation milestone:** 1 — Data Foundation & Database
-- **Status:** Not yet completed; confirm repository/environment state before implementing.
-- **Next gate:** Demonstrate successful, reproducible ingestion and manual SQL querying.
+- **Active implementation milestone:** 2 — Database Intelligence & SQL Safety
+- **Status:** Milestone 1 complete. `uv` project, ingestion of all nine Olist
+  tables into DuckDB, a read-only query layer, 30 passing tests, and a measured
+  data model in `docs/data_model.md`.
+- **Next gate:** A schema/semantic context builder testable without an LLM, and
+  a SQL validator that rejects everything but a single read-only query.
 
 Update this section upon completion of a milestone. Record implementation decisions in `docs/dev_notes.md`.
 
@@ -61,6 +64,12 @@ A reproducible DuckDB database, a documented core data model, and a tested Pytho
 - Add concise, verified semantics: table grain, identifiers, relationships, and join hazards. Keep business choices out of generic schema metadata.
 - Create a SQL validator allowing only the intended single analytical read-only query form.
 - Use a read-only DuckDB connection for LLM-generated SQL. Check query constructs that can access files, extensions, or side-effecting functions; apply restrictions proportionate to the case.
+- Reject **multi-statement** SQL. The engine cannot: `SELECT 1; SELECT 2`
+  executes and returns only the last result. Pinned by
+  `test_multiple_statements_are_NOT_blocked_here`.
+- Bound query cost. `SELECT count(*) FROM geolocation a, geolocation b` counts
+  1.0 trillion rows with no timeout or row cap. Decide between a statement
+  timeout, a row limit, or both.
 - Preserve actionable validation and execution errors.
 
 ### Verification
@@ -116,7 +125,7 @@ A runnable Python natural-language → SQL → DuckDB → explanation pipeline, 
 
 ### Deliverable / done when
 
-A locally runnable, interview-demonstrable UI. No elaborate dashboard, authentication, or deployment work unless explicitly required.
+A locally runnable, demonstrable UI. No elaborate dashboard, authentication, or deployment work unless explicitly required.
 
 ## Milestone 5 — Evaluation & Baseline Stabilization
 

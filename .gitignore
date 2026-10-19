@@ -3,3 +3,5 @@ data/
 __pycache__/
 .venv/
 .DS_Store
+db/
+*.duckdb
