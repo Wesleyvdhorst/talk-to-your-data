@@ -10,7 +10,7 @@ The point of this project is **process, learning and conceptual ownership** as m
 
 # Current status
 
-**Iteration 1, milestone 4 (Minimal Application Interface): complete.** Next is milestone 5 (Evaluation & Baseline Stabilization). Update this line whenever a milestone is finished.
+**Iteration 1 complete** (milestone 5, Evaluation & Baseline Stabilization, finished: 8/8 graded eval questions correct, limitations recorded in `README.md`). Next is iteration 2 (Robustness), driven by the defects in `docs/eval_results.md` and the dev notes. Update this line whenever a milestone is finished.
 
 Do not implement anything from a later step or iteration unless I ask for it explicitly.
 
