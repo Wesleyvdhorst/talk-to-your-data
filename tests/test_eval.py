@@ -36,11 +36,12 @@ class _Messages:
         fmt = kwargs.get("output_config", {}).get("format")
         if fmt:
             field = fmt["schema"]["required"][0]
-            return _Response(
-                json.dumps(
-                    {field: self._sql if field == "sql" else self._clarification}
-                )
+            payload = (
+                {"sql": self._sql, "assumption": ""}
+                if field == "sql"
+                else {field: self._clarification}
             )
+            return _Response(json.dumps(payload))
         return _Response("An answer.")
 
 

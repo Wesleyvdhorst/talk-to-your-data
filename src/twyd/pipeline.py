@@ -48,6 +48,10 @@ class Answer:
     question: str
     classification: Classification | None = None
     sql: str | None = None
+    # The modelling choice the SQL call reported, as prose. None when no SQL
+    # was generated and "" when the model said the question determined the
+    # query outright - two different facts, so they stay apart.
+    assumption: str | None = None
     result: QueryResult | None = None
     answer: str | None = None
     message: str | None = None
@@ -86,7 +90,10 @@ class Answer:
         if self.stage == "classify":
             return steps
         if self.sql:
-            steps.append(("generate_sql", f"{len(self.sql)} characters"))
+            detail = f"{len(self.sql)} characters"
+            if self.assumption:
+                detail += f" - {self.assumption}"
+            steps.append(("generate_sql", detail))
             steps.append(
                 ("validate", "rejected" if self.stage == "validate" else "passed")
             )
@@ -147,7 +154,7 @@ def answer_question(
             message=clarify(question, context, client=client),
             stage="clarify",
         )
-    sql = generate_sql(question, context, client=client)
+    sql, assumption = generate_sql(question, context, client=client)
 
     try:
         validate(sql)
@@ -156,6 +163,7 @@ def answer_question(
             question=question,
             classification=classification,
             sql=sql,
+            assumption=assumption,
             error=str(exc),
             stage="validate",
         )
@@ -167,6 +175,7 @@ def answer_question(
             question=question,
             classification=classification,
             sql=sql,
+            assumption=assumption,
             error=str(exc),
             stage="execute",
         )
@@ -180,12 +189,16 @@ def answer_question(
         # The same context the SQL call got, so the answer can say what a
         # column means rather than inferring it from the name.
         schema_context=context,
+        # Stated to the answer call rather than re-derived by it: the choice
+        # was made by the query, and only the query knows which one it was.
+        assumption=assumption,
         client=client,
     )
     return Answer(
         question=question,
         classification=classification,
         sql=sql,
+        assumption=assumption,
         result=result,
         answer=answer,
     )

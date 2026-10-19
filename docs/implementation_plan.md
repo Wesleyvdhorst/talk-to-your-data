@@ -10,11 +10,12 @@ The assignment at `docs/requirements.txt` is authoritative. Work on **one milest
 ## Current progress
 
 - **Active product iteration:** 3 — the final touches, in progress
-- **Implementation milestones 1–10 done.** Iteration 1 shipped the linear
+- **Implementation milestones 1–11 done.** Iteration 1 shipped the linear
   pipeline and a recorded baseline; iteration 2 added grounded claims about
   results (6), classification before SQL (7), clarification and an
   inspectable trace (8), and a graded eval covering all of it (9). Iteration 3
-  opened with the borderline classification (10).
+  opened with the borderline classification (10) and the modelling
+  assumption behind a number (11).
 - **Latest run: 17/18** (`docs/eval_results.md`). Classification 18/18,
   values 9/10. The iteration 2 baseline is archived in
   `docs/eval_results_iteration2.md` and iteration 1 in
@@ -227,14 +228,18 @@ safety story. The first is real work; the second is not on the table.
 
 **Driven by evidence, in this order:**
 
-1. **Semantic ambiguity.** The headline limitation. "What is the average
-   number of items per order?" is labelled `ANSWERABLE` at 0.98 and still
-   returns 1.1328 or 1.1417 depending on the run, because the sentence reads
-   precisely while the answer depends on a modelling choice (do zero-item
-   orders count?). Lexical ambiguity is caught; this is not. Asking about
-   every denominator would make the app useless, so the open question is how
-   to detect *consequential* choices only — possibly by generating the query
-   two ways and comparing, which is evidence rather than a prompt rule.
+1. **Semantic ambiguity — addressed by surfacing, milestone 11.** Detection
+   was considered and not built. Generating the query two ways and comparing
+   is evidence rather than a prompt rule, but it doubles the cost of every
+   answerable question and turns question 8 into a clarification, which is a
+   change to the eval's expectations rather than to the app's correctness.
+   What was built instead states the choice: the SQL call returns an
+   `assumption` beside the query, `Answer` carries it, the trace names it on
+   the `generate_sql` step and the answer call is given it as a fact. Question
+   8 still fails against its reference on purpose — the failure is the
+   evidence — but it now records *why*: "including the 775 orders with no
+   items counted as zero items". Open: the field fires on nearly every
+   question, so a measure of *consequence* is still missing.
 2. **Overlapping criteria at the margin — done, milestone 10.** "How are we
    doing recently?" was `UNSUPPORTED` at 0.67; it is `AMBIGUOUS` at 0.95 now.
    The criteria learned one distinction: ambiguity is a choice the *data*

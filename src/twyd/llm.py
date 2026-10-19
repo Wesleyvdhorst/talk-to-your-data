@@ -24,7 +24,7 @@ them is a decision worth defending rather than a knob to twiddle:
 """
 
 import json
-from typing import Any, Protocol
+from typing import Any, NamedTuple, Protocol
 
 import anthropic
 
@@ -43,16 +43,25 @@ CLARIFY_MAX_TOKENS = 256
 # effort `high` or below, with no other field alongside it.
 _NO_THINKING = {"type": "between_tools"}
 
-# One required field, no extras. additionalProperties=False is what makes the
-# response shape a guarantee rather than a hope.
+# Two required fields, no extras. additionalProperties=False is what makes the
+# response shape a guarantee rather than a hope, and `required` is what stops
+# `assumption` from being quietly omitted on the questions that most need it.
 _SQL_FORMAT = {
     "type": "json_schema",
     "schema": {
         "type": "object",
         "properties": {
-            "sql": {"type": "string", "description": "a single DuckDB SELECT query"}
+            "sql": {"type": "string", "description": "a single DuckDB SELECT query"},
+            "assumption": {
+                "type": "string",
+                "description": (
+                    "the modelling choice this query makes that the question "
+                    "did not specify, in one clause; empty string if the "
+                    "question fully determines the query"
+                ),
+            },
         },
-        "required": ["sql"],
+        "required": ["sql", "assumption"],
         "additionalProperties": False,
     },
 }
@@ -102,6 +111,15 @@ Rules:
 - If the question needs a column that does not exist, write the closest query
   the schema does support rather than inventing a column.
 
+Also report the `assumption`: the one choice this query makes that the question
+left open and that would change the number if made differently. A denominator
+(which rows the average divides by), an inclusion (whether rows with no child
+rows count), a tie-break, or which of two timestamps defines a date. One
+clause, in plain language, naming what was counted rather than the SQL that
+counts it. If the question and the schema together fully determine the query,
+return an empty string - do not manufacture a choice you did not make, and
+never restate the query as an assumption.
+
 Schema:
 {schema_context}"""
 
@@ -123,7 +141,11 @@ question. Two or three sentences, no preamble, no markdown headings.
 - If the result is empty, say that nothing matched, and do not guess why.
 - If the result was truncated, say the answer covers the rows shown.
 - Mention a caveat only when the SQL makes one real: a filter that excludes
-  rows, or a join that could duplicate them."""
+  rows, or a join that could duplicate them.
+- If an ASSUMPTION line is present, state that choice in a clause of its own.
+  It is the one thing the reader cannot judge the number without, and it came
+  from the query rather than from the question. If there is no ASSUMPTION
+  line, do not invent one."""
 
 
 class _Client(Protocol):
@@ -142,9 +164,28 @@ def _text(response: Any) -> str:
     raise ValueError(f"no text block in response: stop_reason={response.stop_reason!r}")
 
 
+class Generated(NamedTuple):
+    """What the SQL call produced: the query, and the choice it had to make.
+
+    `assumption` is one clause naming the modelling choice the question left
+    open - a denominator, an inclusion, a tie-break - and is an empty string
+    when the question fully determined the query. It is prose, not a contract:
+    nothing branches on it. It exists because "the average number of items per
+    order" is 1.1328 or 1.1417 depending on whether orders with no items
+    count, both readings are defensible, and a number whose denominator is
+    invisible cannot be judged by the person reading it.
+
+    A NamedTuple rather than a dataclass: the call site unpacks it like the
+    tuple it is, and the pipeline reads it by name.
+    """
+
+    sql: str
+    assumption: str
+
+
 def generate_sql(
     question: str, schema_context: str, client: _Client | None = None
-) -> str:
+) -> Generated:
     """Return the SQL the model proposes. It is untrusted until validated."""
     client = client or anthropic.Anthropic()
     response = client.messages.create(
@@ -155,8 +196,11 @@ def generate_sql(
         messages=[{"role": "user", "content": question}],
     )
     # The schema guarantees the shape, so a KeyError or JSONDecodeError here is
-    # a real anomaly and is left to propagate.
-    return json.loads(_text(response))["sql"]
+    # a real anomaly and is left to propagate. That includes a missing
+    # `assumption`: defaulting it to "" would turn a broken response into a
+    # question that silently looks fully determined.
+    payload = json.loads(_text(response))
+    return Generated(sql=payload["sql"], assumption=payload["assumption"])
 
 
 def generate_answer(
@@ -166,6 +210,7 @@ def generate_answer(
     rows: list[tuple[Any, ...]],
     truncated: bool = False,
     schema_context: str = "",
+    assumption: str = "",
     client: _Client | None = None,
 ) -> str:
     """Turn a result into prose. Takes the result's parts, not a QueryResult,
@@ -180,6 +225,11 @@ def generate_answer(
     model can say what a column means instead of inferring it from its name -
     the other half of the same defect, where customer_unique_id was explained
     as "distinct customer IDs".
+
+    assumption comes from the SQL call and is stated as a fact for the same
+    reason the row count is: it is something the query knows and the prose
+    would otherwise have to guess at. An empty string omits the line entirely,
+    so the model is never asked to explain a choice that was not made.
     """
     client = client or anthropic.Anthropic()
     result = {"columns": columns, "rows": [list(row) for row in rows]}
@@ -191,6 +241,8 @@ def generate_answer(
         f"{'truncated at the row cap - more rows matched' if truncated else 'complete'}"
         f"\n{json.dumps(result, default=str)}"
     )
+    if assumption:
+        content += f"\n\nASSUMPTION (the choice the query made, from the SQL call): {assumption}"
     if schema_context:
         content += f"\n\nSchema (what the columns mean; no numbers about this result):\n{schema_context}"
     response = client.messages.create(

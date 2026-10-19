@@ -54,15 +54,15 @@ class StubClient:
         return self.messages.calls
 
 
-def sql_client(sql: str) -> StubClient:
-    return StubClient([StubBlock(json.dumps({"sql": sql}))])
+def sql_client(sql: str, assumption: str = "") -> StubClient:
+    return StubClient([StubBlock(json.dumps({"sql": sql, "assumption": assumption}))])
 
 
 def test_generate_sql_returns_the_sql_from_the_structured_response():
     client = sql_client("SELECT count(*) FROM orders")
-    assert (
-        generate_sql("how many orders", "SCHEMA", client=client)
-        == "SELECT count(*) FROM orders"
+    assert generate_sql("how many orders", "SCHEMA", client=client) == (
+        "SELECT count(*) FROM orders",
+        "",
     )
 
 
@@ -74,12 +74,12 @@ def test_generate_sql_sends_the_schema_and_the_question():
     assert call["messages"] == [{"role": "user", "content": "how many orders?"}]
 
 
-def test_generate_sql_asks_for_a_single_sql_field_and_nothing_else():
+def test_generate_sql_asks_for_the_two_fields_and_nothing_else():
     """The output schema is what replaces temperature=0 and prefill here."""
     client = sql_client("SELECT 1")
     generate_sql("q", "SCHEMA", client=client)
     schema = client.calls[0]["output_config"]["format"]["schema"]
-    assert schema["required"] == ["sql"]
+    assert schema["required"] == ["sql", "assumption"]
     assert schema["additionalProperties"] is False
 
 
@@ -228,3 +228,57 @@ def test_clarify_runs_with_thinking_off_and_a_tight_cap():
     assert call["thinking"] == {"type": "between_tools"}
     assert call["output_config"]["effort"] == CLARIFY_EFFORT == "low"
     assert call["max_tokens"] == CLARIFY_MAX_TOKENS == 256
+
+
+# The modelling choice behind a number (milestone 11). The eval recorded
+# "average items per order" as ANSWERABLE at 0.98 and still returned 1.1328
+# where the reference said 1.1417: two defensible denominators, one sentence.
+# Nothing here detects that - these pin that the choice travels, and that an
+# absent choice is not invented.
+
+
+def test_the_assumption_comes_back_alongside_the_sql():
+    client = sql_client("SELECT avg(n) FROM t", "orders with no items count as zero")
+    generated = generate_sql("average items per order", "SCHEMA", client=client)
+    assert generated.sql == "SELECT avg(n) FROM t"
+    assert generated.assumption == "orders with no items count as zero"
+
+
+def test_a_response_without_an_assumption_raises_rather_than_defaulting():
+    """Defaulting to "" would turn a broken response into a question that
+    silently looks fully determined - the one case this field exists for."""
+    client = StubClient([StubBlock(json.dumps({"sql": "SELECT 1"}))])
+    with pytest.raises(KeyError):
+        generate_sql("q", "SCHEMA", client=client)
+
+
+def test_the_sql_prompt_asks_for_the_choice_and_forbids_inventing_one():
+    client = sql_client("SELECT 1")
+    generate_sql("q", "SCHEMA", client=client)
+    system = client.calls[0]["system"]
+    assert "would change the number if made differently" in system
+    assert "do not manufacture a choice you did not make" in system
+
+
+def test_the_assumption_is_stated_to_the_answer_call_as_a_fact():
+    client = StubClient([StubBlock("ok")])
+    generate_answer(
+        "average items per order",
+        "SELECT avg(n) FROM t",
+        ["avg"],
+        [(1.1328,)],
+        assumption="orders with no items count as zero",
+        client=client,
+    )
+    content = client.calls[0]["messages"][0]["content"]
+    assert "ASSUMPTION" in content
+    assert "orders with no items count as zero" in content
+    assert "state that choice in a clause of its own" in client.calls[0]["system"]
+
+
+def test_no_assumption_line_is_sent_when_the_question_determined_the_query():
+    """An empty assumption must not become an empty ASSUMPTION heading: the
+    model would then explain a choice that was never made."""
+    client = StubClient([StubBlock("ok")])
+    generate_answer("q", "SELECT 1", ["n"], [(1,)], assumption="", client=client)
+    assert "ASSUMPTION" not in client.calls[0]["messages"][0]["content"]

@@ -50,8 +50,10 @@ class ClarifyingClient:
 class ScriptedClient:
     """Replies in order: the first call is SQL generation, the second prose."""
 
-    def __init__(self, sql: str, answer: str = "An answer."):
-        self.messages = _Messages([json.dumps({"sql": sql}), answer])
+    def __init__(self, sql: str, answer: str = "An answer.", assumption: str = ""):
+        self.messages = _Messages(
+            [json.dumps({"sql": sql, "assumption": assumption}), answer]
+        )
 
     @property
     def call_count(self):
@@ -259,3 +261,58 @@ def test_the_classifier_is_given_the_columns_not_only_the_table_names(conn, jev)
     answer_question("how many orders?", conn, client=client, jev=jev)
     assert "customer_unique_id" in jev.instructions[0]
     assert "orders: order_id, customer_id, order_status" in jev.instructions[0]
+
+
+# The assumption travels with the SQL (milestone 11).
+
+
+def test_the_assumption_reaches_the_answer_and_the_answer_call(conn, jev):
+    client = ScriptedClient(
+        "SELECT count(*) AS n FROM orders",
+        assumption="orders with no items count as zero",
+    )
+    result = answer_question("average items per order", conn, client=client, jev=jev)
+
+    assert result.assumption == "orders with no items count as zero"
+    # Stated to the prose call rather than left for it to infer.
+    answer_call = client.messages.calls[1]
+    assert "orders with no items count as zero" in answer_call["messages"][0]["content"]
+
+
+def test_the_trace_names_the_choice_on_the_generate_sql_step(conn, jev):
+    """Not its own stage: no extra step ran, the step that ran learned a
+    detail. A new stage string would claim otherwise."""
+    client = ScriptedClient("SELECT count(*) AS n FROM orders", assumption="zeros count")
+    result = answer_question("q", conn, client=client, jev=jev)
+
+    stages = dict(result.trace)
+    assert "zeros count" in stages["generate_sql"]
+    assert "assumption" not in stages  # no invented stage
+
+
+def test_a_fully_determined_question_adds_nothing_to_the_trace(conn, jev):
+    client = ScriptedClient("SELECT count(*) AS n FROM orders", assumption="")
+    result = answer_question("how many orders", conn, client=client, jev=jev)
+
+    assert result.assumption == ""
+    sql = "SELECT count(*) AS n FROM orders"
+    assert dict(result.trace)["generate_sql"] == f"{len(sql)} characters"
+
+
+def test_a_declined_question_has_no_assumption_at_all(conn):
+    """None, not "": no SQL was generated, so no choice was made. The empty
+    string means the opposite - the model considered it and found none."""
+    client = ClarifyingClient("By best do you mean revenue or reviews?")
+    result = answer_question(
+        "what are the best products?", conn, client=client, jev=StubJev("AMBIGUOUS")
+    )
+
+    assert result.assumption is None
+
+
+def test_rejected_sql_keeps_the_assumption_that_came_with_it(conn, jev):
+    client = ScriptedClient("DROP TABLE orders", assumption="whatever it claimed")
+    result = answer_question("drop it", conn, client=client, jev=jev)
+
+    assert not result.ok
+    assert result.assumption == "whatever it claimed"

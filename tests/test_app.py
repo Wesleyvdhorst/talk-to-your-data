@@ -71,3 +71,14 @@ def test_the_trace_is_rendered_from_the_pipeline_not_rebuilt_in_the_ui():
     source = (Path(__file__).parent.parent / "src" / "twyd" / "app.py").read_text()
     assert "result.trace" in source
     assert "st.expander(\"Pipeline\")" in source
+
+
+def test_the_assumption_is_shown_with_the_answer_and_not_as_markdown():
+    """The choice behind a number belongs next to the number, not buried in
+    the trace - and it is model output, so st.text renders it like the rest."""
+    source = (Path(__file__).parent.parent / "src" / "twyd" / "app.py").read_text()
+    assert "if result.assumption:" in source
+    assert "st.text(result.assumption)" in source
+    # Inside the answer branch, after the answer itself.
+    assert source.index("st.text(result.answer)") < source.index("st.text(result.assumption)")
+    assert source.index("st.text(result.assumption)") < source.index("else:\n        # The stage")

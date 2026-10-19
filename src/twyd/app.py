@@ -87,6 +87,12 @@ if question:
         with st.container(border=True):
             st.caption("Answer")
             st.text(result.answer)
+            if result.assumption:
+                # The choice the query made that the question left open. Shown
+                # next to the answer rather than buried in the trace, because
+                # it is the one thing the number cannot be judged without.
+                st.caption("The query assumed")
+                st.text(result.assumption)
     else:
         # The stage is our own string and says what went wrong; the detail
         # below it is untrusted, so it stays plain.
