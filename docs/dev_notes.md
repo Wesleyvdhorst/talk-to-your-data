@@ -165,3 +165,40 @@ real-data facts, so against the small fixture database the notes and the
 introspected row counts disagree. `max_rows=1000` and 30 seconds are guesses,
 not measurements. Nothing calls `validate()` yet — wiring it in front of
 execution is milestone 3.
+
+### Post-review addendum: the function denylist was the wrong shape
+
+An automated security review flagged `_FORBIDDEN_FUNCTIONS` in `sql_guard.py`
+as an incomplete denylist. I went looking for a bypass and found one
+immediately:
+
+```sql
+SELECT * FROM 'secrets.csv'
+```
+
+No function name appears anywhere in that query. DuckDB resolves a bare string
+in `FROM` to a file via its replacement scans, and the parse tree calls it a
+`BASE_TABLE` named `secrets.csv`. A list of function names cannot see it, and
+neither could a longer list.
+
+**Fix:** the second layer is now an allowlist built from the parse tree, not a
+denylist of names. `json_serialize_sql` gives the tree (parsed, never
+executed); the walk collects every `BASE_TABLE`, every `TABLE_FUNCTION` and
+every CTE name, then rejects any table that is not one of the nine ingested
+tables and any table function at all. The allowlist comes from
+`ingest.TABLES`, so it cannot drift from what was actually loaded.
+
+Consequences I accepted:
+
+- `PRAGMA database_list` is now rejected. It parses as `SELECT`, but the
+  serialiser rewrites it into a `pragma_database_list()` reference. No question
+  about the data needs it.
+- Table functions like `range()` are rejected too. Analytical queries over
+  these nine tables do not need them, and "no table functions" is a rule I can
+  state in one sentence.
+- SQL the serialiser cannot represent is rejected rather than passed through.
+
+**The lesson, and it is the same one as milestone 1's addendum:** my denylist
+was enumerating the attacks I had thought of. The allowlist enumerates what the
+feature actually needs, which is nine table names. Nine is a number I can
+check; the set of ways to name a file is not.

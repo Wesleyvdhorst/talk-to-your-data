@@ -71,6 +71,11 @@ Known semantic traps, every one verified against the real data — the numbers a
 - **Bounded loops.** Every retry, repair or agent loop has a hard maximum.
 - **Small context.** Send prompts concise, relevant schema context, not the whole database description.
 - **Secrets.** API keys come from environment variables and are never committed or printed.
+- **Git: fetch first.** Run `git fetch --all` before any branching, committing,
+  rebasing or cherry-picking, and before reasoning about where a branch sits.
+  Local refs go stale silently: a branch merged on the remote still looks
+  unmerged locally, and a plan built on that is wrong. Never state what a
+  branch contains without fetching first.
 - **No unrelated refactoring** while implementing a feature, and no rewriting components that already work.
 
 # Workflow (substantial tasks)

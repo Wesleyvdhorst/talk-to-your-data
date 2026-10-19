@@ -20,7 +20,12 @@ ALLOWED = [
     # side-effecting spellings parse as SET/PRAGMA and are rejected below.
     "DESCRIBE orders",
     "SHOW TABLES",
-    "PRAGMA database_list",
+    # CTE names look like table references at their use site.
+    "WITH orders_per_state AS (SELECT customer_state AS s FROM customers) "
+    "SELECT s, count(*) FROM orders_per_state GROUP BY s",
+    "WITH a AS (SELECT order_id FROM orders), b AS (SELECT order_id FROM a) "
+    "SELECT count(*) FROM b",
+    "SELECT (SELECT count(*) FROM order_items) AS n",
 ]
 
 
@@ -49,10 +54,24 @@ REJECTED = [
     "PRAGMA disable_verification",
     "COPY orders TO '/tmp/leak.csv'",
     "EXPLAIN SELECT 1",  # not a result we can explain to a user
+    # PRAGMA database_list parses as SELECT, but the serialiser rewrites it
+    # into a pragma_database_list() reference, so the allowlist rejects it.
+    # Fine: no question about the data needs it.
+    "PRAGMA database_list",
     # Host access, blocked here as well as by the engine.
     "SELECT * FROM read_csv('/etc/passwd')",
     "SELECT * FROM read_parquet('/tmp/x.parquet')",
     "SELECT * FROM glob('/etc/*')",
+    # A bare string IS a file reference in DuckDB. No function name appears
+    # anywhere in this query, which is exactly what a denylist cannot see.
+    "SELECT * FROM 'secrets.csv'",
+    "SELECT * FROM '/etc/passwd'",
+    "SELECT * FROM 's3://bucket/x.parquet'",
+    # Tables that exist but are not ours, and internal catalogs.
+    "SELECT * FROM information_schema.tables",
+    "SELECT * FROM duckdb_settings()",
+    "SELECT * FROM range(5)",
+    "SELECT * FROM sqlite_master",
     # Nothing we cannot classify gets through.
     "SELCT 1",
     "SELECT * FROM",
@@ -74,6 +93,20 @@ def test_the_rejection_says_why():
         validate("DROP TABLE orders")
     with pytest.raises(UnsafeSQL, match="does not parse"):
         validate("SELCT 1")
+
+
+def test_the_table_allowlist_is_the_nine_ingested_tables():
+    from twyd.ingest import TABLES
+    from twyd.sql_guard import ALLOWED_TABLES
+
+    assert ALLOWED_TABLES == frozenset(TABLES)
+
+
+def test_a_narrower_allowlist_can_be_passed_in():
+    only_orders = frozenset({"orders"})
+    assert validate("SELECT count(*) FROM orders", only_orders)
+    with pytest.raises(UnsafeSQL, match="unknown table"):
+        validate("SELECT count(*) FROM customers", only_orders)
 
 
 def test_a_write_hidden_inside_a_select_shaped_string_is_still_a_write():
