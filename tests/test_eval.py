@@ -7,6 +7,7 @@ grading logic rather than the model's SQL.
 import json
 
 import pytest
+from conftest import StubJev
 
 from twyd.eval import QUESTIONS, Result, _close, as_markdown, run_eval
 
@@ -22,31 +23,48 @@ class _Response:
 
 
 class _Messages:
-    def __init__(self, sql):
+    def __init__(self, sql, clarification):
         self._sql = sql
+        self._clarification = clarification
         self.calls = []
 
     def create(self, **kwargs):
         self.calls.append(kwargs)
-        # Key off the request, not the call count: a failed stage skips the
-        # prose call, which would knock any odd/even scheme out of step.
-        if "format" in kwargs.get("output_config", {}):
-            return _Response(json.dumps({"sql": self._sql}))
+        # Key off what the request asks for, not the call count: a failed stage
+        # skips the prose call, which would knock any odd/even scheme out of
+        # step, and two different calls now use structured output.
+        fmt = kwargs.get("output_config", {}).get("format")
+        if fmt:
+            field = fmt["schema"]["required"][0]
+            return _Response(
+                json.dumps(
+                    {field: self._sql if field == "sql" else self._clarification}
+                )
+            )
         return _Response("An answer.")
 
 
 class AlwaysClient:
-    """Answers every question with the same SQL."""
+    """Answers every question with the same SQL, and every clarification with
+    the same question back."""
 
-    def __init__(self, sql):
-        self.messages = _Messages(sql)
+    def __init__(self, sql, clarification="Do you mean by revenue or by reviews?"):
+        self.messages = _Messages(sql, clarification)
 
 
 def test_the_question_set_is_what_the_docs_promise():
-    graded = [q for q in QUESTIONS if q.reference]
-    assert len(QUESTIONS) == 12
-    assert len(graded) == 8
-    assert {q.id for q in QUESTIONS} == set(range(1, 13))
+    assert len(QUESTIONS) == 18
+    assert {q.id for q in QUESTIONS} == set(range(1, 19))
+    assert len([q for q in QUESTIONS if q.reference]) == 10
+    # Every question is graded on its label now, including the four that were
+    # record-only when there was no classifier to grade.
+    assert all(q.expected_label in ("ANSWERABLE", "AMBIGUOUS", "UNSUPPORTED") for q in QUESTIONS)
+    # A question that should be declined has nothing to execute.
+    assert all(
+        q.reference is None and q.reference_rows is None
+        for q in QUESTIONS
+        if q.expected_label != "ANSWERABLE"
+    )
 
 
 def test_every_reference_query_runs_and_returns_one_value(conn):
@@ -79,11 +97,44 @@ def test_unsafe_sql_counts_as_an_error_not_a_pass(conn, jev):
     assert all(r.answer.stage == "validate" for r in graded)
 
 
-def test_record_only_questions_are_never_scored(conn, jev):
-    results = run_eval(conn, client=AlwaysClient("SELECT 1"), jev=jev)
-    record = [r for r in results if r.question.reference is None]
-    assert len(record) == 4
-    assert all(r.verdict == "RECORD" for r in record)
+def test_a_question_with_no_reference_is_graded_on_its_label(conn):
+    """The four record-only questions of iteration 1 are now gradeable: there
+    is a classifier to be right or wrong about them."""
+    results = run_eval(conn, client=AlwaysClient("SELECT 1"), jev=StubJev("UNSUPPORTED"))
+    by_id = {r.question.id: r for r in results}
+    for qid in (10, 11, 13, 14):  # the four UNSUPPORTED questions
+        assert by_id[qid].verdict == "PASS", by_id[qid].why
+        assert by_id[qid].answer.sql is None  # declined, so nothing ran
+
+
+def test_a_wrong_label_fails_even_when_nothing_else_is_wrong(conn, jev):
+    """The `jev` fixture calls everything ANSWERABLE, so every question that
+    should have been declined is a failure - and says so."""
+    results = run_eval(conn, client=AlwaysClient("SELECT count(*) FROM orders"), jev=jev)
+    declined = [r for r in results if r.question.expected_label != "ANSWERABLE"]
+    assert len(declined) == 7
+    assert all(r.verdict == "FAIL" for r in declined)
+    assert all("expected" in r.why for r in declined)
+
+
+def test_an_ambiguous_question_that_does_not_ask_anything_fails(conn):
+    """Labelling a question AMBIGUOUS and then saying nothing useful is not a
+    pass: the point of the label is to ask."""
+    results = run_eval(conn, client=AlwaysClient("SELECT 1", clarification="No question here."),
+                       jev=StubJev("AMBIGUOUS"))
+    by_id = {r.question.id: r for r in results}
+    assert by_id[9].verdict == "FAIL"
+    assert by_id[9].why == "declined without asking anything"
+
+
+def test_a_row_count_is_graded_when_the_question_asks_for_many_rows(conn):
+    """Question 17 exists because an answer must not miscount its own rows.
+    The count is graded deterministically; the prose is read by hand."""
+    results = run_eval(conn, client=AlwaysClient("SELECT 1 AS one"), jev=StubJev())
+    by_id = {r.question.id: r for r in results}
+    assert by_id[17].expected_rows is not None
+    assert by_id[17].verdict == "FAIL"
+    assert "rows, expected" in by_id[17].why
 
 
 @pytest.mark.parametrize(

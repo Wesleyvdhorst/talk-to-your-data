@@ -9,13 +9,20 @@ The assignment at `docs/requirements.txt` is authoritative. Work on **one milest
 
 ## Current progress
 
-- **Active product iteration:** 1 — Core Product
-- **Active implementation milestone:** 2 — Database Intelligence & SQL Safety
-- **Status:** Milestone 1 complete. `uv` project, ingestion of all nine Olist
-  tables into DuckDB, a read-only query layer, 30 passing tests, and a measured
-  data model in `docs/data_model.md`.
-- **Next gate:** A schema/semantic context builder testable without an LLM, and
-  a SQL validator that rejects everything but a single read-only query.
+- **Active product iteration:** 2 — Robustness, complete
+- **Implementation milestones 1–9 done.** Iteration 1 shipped the linear
+  pipeline and a recorded baseline; iteration 2 added grounded claims about
+  results (6), classification before SQL (7), clarification and an
+  inspectable trace (8), and a graded eval covering all of it (9).
+- **Latest run: 16/18** (`docs/eval_results.md`). Classification 17/18,
+  values 9/10. The iteration 1 baseline is archived in
+  `docs/eval_results_iteration1.md`.
+- **Milestone 10 (one bounded SQL repair attempt) was not built**, on
+  purpose: the run produced zero validation and zero execution failures, so
+  there is no observed limitation for it to fix. The condition for building it
+  is a recorded run that fails at `validate` or `execute`.
+- **Next gate:** iteration 3, driven by the two failures in the current run
+  and the limitations in `README.md`.
 
 Update this section upon completion of a milestone. Record implementation decisions in `docs/dev_notes.md`.
 
@@ -152,78 +159,93 @@ A tested and explainable baseline product with documented limitations and eviden
 
 ---
 
-# Product Iteration 2 — Robustness
+# Product Iteration 2 — Robustness (complete)
 
-**Goal:** Address observed baseline problems without changing the core purpose.
+**Goal:** address the four defects the milestone 5 baseline recorded, without
+changing the core purpose.
 
-**Observed in the milestone 5 baseline** (evidence in `eval_results.md` and
-`dev_notes.md`), in the order I would fix them:
+**What was built,** one milestone and one PR each:
 
-1. Statements *about* a result are not grounded, while the values are: a
-   20-row result described as 19 rows, and `customer_unique_id` described as
-   "distinct customer IDs". The answer prompt constrains numbers and says
-   nothing about claims regarding the shape of the result.
-2. An underspecified question gets a different reading on different runs
-   (1.1328 vs 1.1417 for "average items per order"), and `temperature` does
-   not exist on this model - so the fix is to ask, not to tune.
-3. Nonsense input is answered through the SQL channel
-   (`SELECT 'your question looks like random keystrokes' AS message`) because
-   the pipeline has no way to decline. Classification must come *before* SQL
-   generation.
-4. An unanswerable question gets a number: "what will sales be next month?"
-   returned a trailing three-month average.
+- **Milestone 6 — grounded claims about the result.** The row count, column
+  names and truncation flag are stated as facts in the answer prompt
+  (`len(rows)` is Python's job), and the answer call now receives the same
+  schema context as the SQL call so a column can be explained from measured
+  semantics rather than its name.
+- **Milestone 7 — classification before SQL generation.** `ANSWERABLE` /
+  `AMBIGUOUS` / `UNSUPPORTED` from TypeSafe's Jev, reasoning over a
+  column-level schema overview (`schema.column_overview`). `UNSUPPORTED` ends
+  the turn with a fixed scope message; no SQL is generated. `Answer` gained a
+  third outcome: a decline is neither an answer nor an error.
+- **Milestone 8 — clarification and the trace.** `AMBIGUOUS` asks which
+  reading was meant, naming only readings the schema supports. `Answer.trace`
+  is derived from the fields the pipeline already sets, so it cannot claim a
+  stage that did not run.
+- **Milestone 9 — the graded eval.** Eighteen questions, every one graded on
+  its label, ten also on a value, one on its row count. The four that were
+  record-only in iteration 1 are now gradeable, which is most of what this
+  iteration adds to the set.
 
-Possible scope, subject to the Milestone 5 results:
+**Deliberately not built:**
 
-- Classify questions as `ANSWERABLE`, `AMBIGUOUS`, or `UNSUPPORTED`, using
-  TypeSafe's Jev - a zero-shot decision model, which is the shape of this
-  task (three labels, a calibrated confidence, no generation) and far
-  cheaper per call than a third Claude call. Decided; the rest of this
-  section is re-cut when the iteration closes.
-- Request clarification for genuinely ambiguous questions rather than guessing.
-- **Support follow-up questions.** A question may refer to the previous one
-  rather than restate it: "and for late deliveries?", "break that down by
-  state", "why?". The pipeline keeps a bounded history of prior turns
-  (question, SQL, result shape) and resolves the reference before generating
-  SQL. Requirements:
-  - A **hard cap** on history length (turns and tokens), like every other loop
-    in this project. Old turns are dropped, not summarised.
-  - Each turn still produces its own validated SQL and its own grounded
-    answer. History informs generation; it never licenses reusing an earlier
-    result as if it were this question's evidence.
-  - A follow-up that cannot be resolved against the history is treated as
-    `AMBIGUOUS` and asks, rather than guessing which prior turn was meant.
-  - The clarification flow and the follow-up flow are the same mechanism: an
-    answered clarification *is* a follow-up turn.
-- Introduce **at most one** SQL repair attempt when useful and safe.
-- Capture inspectable pipeline artifacts (e.g., selected schema, generated SQL, validation outcome, execution error, result, final answer).
-- Strengthen the fixed evaluation suite, including classification, failure handling, and **multi-turn sequences** (a first question plus two or three follow-ups, graded on the final answer and on whether the reference was resolved correctly).
+- **One bounded SQL repair attempt.** Conditional on evidence, and the
+  evidence did not appear: zero validation and zero execution failures across
+  18 questions. Build it when a recorded run fails at `validate` or `execute`.
+- **Follow-up questions.** Moved to iteration 3 (below). A clarification ends
+  the turn and the user re-asks.
+- **A confidence threshold on the classifier.** Measured and rejected: the
+  question whose correct answer is zero sits at 0.40–0.55, below questions
+  that are genuinely harder, so any threshold would misroute it.
+- **Thinking off on the answer call.** `thinking={"type": "between_tools"}` is
+  used for the clarification, where a varying question is itself a kind of
+  ambiguity. It is *not* used for the answer call: judging which caveats are
+  real is the one place in the pipeline where reasoning earns its cost, and
+  nothing in the recorded run suggests those answers need to be cheaper.
 
-**Outcome:** Better reliability, clearer uncertainty handling, and a more inspectable pipeline. Measure improvements against the initial baseline.
+**Outcome:** 16/18, against a baseline of 8/8 on a set that could not grade
+the four questions this iteration is about. All four recorded defects are
+fixed, with the evidence in `README.md`. The two remaining failures are the
+input to iteration 3.
 
 # Product Iteration 3 — Richer Data Understanding
 
-**Goal:** Support questions requiring review text and, only if justified, more flexible orchestration.
+**Goal:** the two failures the iteration 2 run recorded, then review text.
 
-Possible scope:
+**Driven by evidence, in this order:**
 
-- Route questions among `SQL_ONLY`, `REVIEW_TEXT`, and `HYBRID`.
-- Add semantic search over the Portuguese `review_comment_message` field.
-- Combine structured SQL metrics with relevant review excerpts where needed.
-- **Follow-ups across routes.** A follow-up may need a different route than the
-  question before it: "how many orders were late?" (`SQL_ONLY`) followed by
-  "what did those customers complain about?" (`REVIEW_TEXT`, scoped to the
-  previous result). Requirements:
-  - Routing is decided **per turn**, never inherited from the previous turn.
-  - A follow-up may narrow to the previous turn's rows, so the history carries
-    the prior SQL, not just the prior numbers - the scope is re-derived by
-    query, never by pasting an earlier result into the prompt.
-  - The same hard history cap as iteration 2 applies. Retrieval over review
-    text is bounded by excerpt count as well.
-- Consider a bounded agent loop of **3–4 tool steps maximum**, but only if fixed routing/pipelines demonstrably fail to cover important use cases.
-- Evaluate grounding, retrieval relevance, and integration between structured and unstructured evidence, **including follow-ups that change route mid-conversation**.
+1. **Semantic ambiguity.** The headline limitation. "What is the average
+   number of items per order?" is labelled `ANSWERABLE` at 0.98 and still
+   returns 1.1328 or 1.1417 depending on the run, because the sentence reads
+   precisely while the answer depends on a modelling choice (do zero-item
+   orders count?). Lexical ambiguity is caught; this is not. Asking about
+   every denominator would make the app useless, so the open question is how
+   to detect *consequential* choices only — possibly by generating the query
+   two ways and comparing, which is evidence rather than a prompt rule.
+2. **Overlapping criteria at the margin.** "How are we doing recently?" is
+   labelled `UNSUPPORTED` at 0.67 where `AMBIGUOUS` serves the user better.
+   Any change here is a change to a classifier that the eval already measures,
+   so it must be recorded as its own before/after run.
+3. **Follow-up questions**, moved from iteration 2. A question may refer to
+   the previous one: "and for late deliveries?", "break that down by state".
+   Requirements unchanged from the earlier plan:
+   - A **hard cap** on history length, in turns and tokens. Old turns are
+     dropped, not summarised.
+   - Each turn produces its own validated SQL and its own grounded answer.
+     History informs generation; it never licenses reusing an earlier result
+     as this question's evidence.
+   - An unresolvable follow-up is `AMBIGUOUS` and asks.
+   - The clarification flow and the follow-up flow are the same mechanism: an
+     answered clarification *is* a follow-up turn.
+4. **Review text.** Route among `SQL_ONLY`, `REVIEW_TEXT` and `HYBRID`, and
+   add semantic search over the Portuguese `review_comment_message` (~41% of
+   reviews have one). Routing is decided per turn, never inherited. A
+   follow-up may narrow to the previous turn's rows, so history carries the
+   prior SQL rather than its numbers — scope is re-derived by query, never by
+   pasting a result into a prompt. Retrieval is bounded by excerpt count.
+5. **A bounded agent loop of 3–4 tool steps**, only if fixed routing
+   demonstrably fails. Still unjustified.
 
-**Outcome:** More expressive data interaction without unjustified agent complexity.
+**Outcome:** more expressive data interaction, with each addition traceable to
+a failure in a recorded run.
 
 ---
 
