@@ -86,7 +86,8 @@ timestamp rather than status.
 ## Limitations
 
 Known and measured, not hypothetical. The current eval run is in
-`docs/eval_results.md` (16/18), the iteration 1 baseline in
+`docs/eval_results.md` (17/18), the iteration 2 baseline in
+`docs/eval_results_iteration2.md` and iteration 1 in
 `docs/eval_results_iteration1.md`.
 
 - **Semantic ambiguity is not caught, only lexical ambiguity.** This is the
@@ -98,11 +99,14 @@ Known and measured, not hypothetical. The current eval run is in
   (only the 98,666 orders that have items). Both are defensible readings of
   the same sentence. Asking about every denominator choice would make the app
   useless, so this is recorded rather than patched.
-- **One borderline classification.** "How are we doing recently?" is labelled
-  UNSUPPORTED at 0.67 confidence where AMBIGUOUS was expected: the data can
-  answer it once a metric is chosen, so asking back would serve the user
-  better than declining. Low confidence, and the one case in the set where the
-  three criteria genuinely overlap.
+- **Vagueness and missing data overlap, and the boundary is prompt-written.**
+  "How are we doing recently?" was UNSUPPORTED at 0.67 in iteration 2 and is
+  AMBIGUOUS at 0.95 now, after the criteria were told that vagueness is about
+  a choice the data *could* make while unsupported is about what the data
+  lacks. Widening it that far first pulled "how will we be doing next
+  quarter?" across with it, so the criteria carry an explicit carve-out for
+  forecasts. The boundary holds because two integration tests pin both sides
+  of it, not because the wording is self-evident.
 - **The classifier's confidence is recorded, never acted on.** Thresholding it
   is tempting and would be wrong: "how many orders were placed in 2030?" — the
   question whose correct answer is zero — sits at 0.40–0.55, below several

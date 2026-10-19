@@ -10,14 +10,14 @@ The point of this project is **process, learning and conceptual ownership** as m
 
 # Current status
 
-**Iteration 2 complete** (milestone 9, the graded eval: 16/18, recorded in
-`docs/eval_results.md` against the archived baseline in
-`docs/eval_results_iteration1.md`). Milestone 10 (one bounded SQL repair
-attempt) was deliberately not built: the run produced zero validation and zero
-execution failures, so there is no observed limitation for it to fix. Next is
-iteration 3, driven by the two failures in that run — semantic ambiguity that
-reads as precise, and one borderline classification — then follow-ups and
-review text. Update this line whenever a milestone is finished.
+**Iteration 3 in progress.** Scope fixed at three milestones: the borderline
+classification (10, done — 17/18, classification 18/18, recorded in
+`docs/eval_results.md` against the archived iteration 2 baseline in
+`docs/eval_results_iteration2.md`), surfacing the modelling assumption the SQL
+makes (11), and follow-up questions with bounded history (12). Review text and
+the agent loop are deliberately **not** built this iteration; the reasons are
+in `docs/implementation_plan.md`. Update this line whenever a milestone is
+finished.
 
 Do not implement anything from a later step or iteration unless I ask for it explicitly.
 
