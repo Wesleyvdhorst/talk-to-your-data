@@ -425,3 +425,64 @@ denylist cannot see `FROM 'secrets.csv'`; untrusted data is input to the
 renderer, not just to SQL; and when a sanitiser needs a third patch, the
 sanitiser is the wrong design. Each fix was small. The reason each was needed
 was that my threat model was one layer narrower than the system.
+
+## Milestone 5 — evaluation and baseline stabilisation
+
+**Attempted:** twelve questions written *before* the first run
+(`docs/eval_questions.md`), a deterministic runner (`eval.py`), one recorded
+run, and the documentation.
+
+**Decisions I made:** no LLM judge. Each graded question carries reference SQL
+I wrote myself, executed at eval time, and the model's value is compared to
+it - deciding whether 96,096 equals 96,096 does not need a model, and a judge
+would add the exact failure mode I am trying to measure. Four questions are
+record-only: iteration 1 has no classification or clarification, so grading
+them pass/fail would measure a feature that does not exist.
+
+**My grading was wrong before the model was.** First run showed
+`PASS … got=1.13 want=1.14` for "average number of items per order", which is
+a contradiction on its face. The model had used `LEFT JOIN`, averaging over
+all 99,441 orders with zero-item orders counted as zero (1.1328); my reference
+averaged over the 98,666 orders that have items (1.1417). Two different
+questions, 0.0089 apart - and my tolerance of 0.01, chosen for float noise,
+was just wide enough to call that agreement. Tightened to 0.005: wide enough
+that a model rounding 2.5665 to 2.57 still matches, narrow enough that a
+different query does not.
+
+I did **not** change the question or the reference to match what the model
+produced. Rewriting a reference after seeing the output is how an eval starts
+flattering the thing it measures.
+
+**Then the same question answered differently.** The re-run returned 1.1417 -
+the other interpretation - with no change to the prompt or settings. The
+question is underspecified about zero-item orders, and `temperature` does not
+exist on this model, so this is not something I can pin down with sampling
+settings. It is the cleanest possible argument for iteration 2's `AMBIGUOUS`
+class: the fix is to ask, not to tune.
+
+**Three findings from the record-only questions:**
+
+- `asdfgh` produced `SELECT 'Your question looks like random keystrokes...' AS
+  message`. A valid, safe, table-free query used as a message channel. The
+  pipeline has no way to say "I cannot use this", so the SQL channel gets used
+  as one - which is an argument for classification *before* SQL generation.
+- "What will sales be next month?" produced a trailing three-month average,
+  labelled as an estimate rather than a prediction. Honest about method, still
+  a number in answer to a question this data cannot answer.
+- "What are the best products?" picked revenue, said so at the end - and then
+  claimed "the list shows 19 products, not the 20 the query asked for". I ran
+  its own SQL: 20 rows, 20 distinct products, and no product is missing from
+  the catalog. It invented a limitation and built a caveat on top of it.
+
+**The defect worth presenting.** Both answer-level defects now on record - the
+"distinct customer IDs" wording and this fabricated row count - have the same
+shape: the *values* are grounded in the result, while *statements about* the
+result are not. My answer prompt says "use only numbers that appear in the
+result", which the model obeyed; it says nothing about claims regarding the
+shape of the result, and that is where it drifts. Grounding a value and
+grounding a description of a value are different constraints, and I had only
+written the first one.
+
+**Not fixed, on purpose.** The prompt stays as it is for now. The eval set
+exists to measure iteration 2 against this baseline, and tuning the prompt in
+the same breath as writing the eval would leave nothing to compare to.

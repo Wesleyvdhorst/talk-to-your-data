@@ -156,6 +156,23 @@ A tested and explainable baseline product with documented limitations and eviden
 
 **Goal:** Address observed baseline problems without changing the core purpose.
 
+**Observed in the milestone 5 baseline** (evidence in `eval_results.md` and
+`dev_notes.md`), in the order I would fix them:
+
+1. Statements *about* a result are not grounded, while the values are: a
+   20-row result described as 19 rows, and `customer_unique_id` described as
+   "distinct customer IDs". The answer prompt constrains numbers and says
+   nothing about claims regarding the shape of the result.
+2. An underspecified question gets a different reading on different runs
+   (1.1328 vs 1.1417 for "average items per order"), and `temperature` does
+   not exist on this model - so the fix is to ask, not to tune.
+3. Nonsense input is answered through the SQL channel
+   (`SELECT 'your question looks like random keystrokes' AS message`) because
+   the pipeline has no way to decline. Classification must come *before* SQL
+   generation.
+4. An unanswerable question gets a number: "what will sales be next month?"
+   returned a trailing three-month average.
+
 Possible scope, subject to the Milestone 5 results:
 
 - Classify questions as `ANSWERABLE`, `AMBIGUOUS`, or `UNSUPPORTED`.
