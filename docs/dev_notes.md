@@ -641,9 +641,49 @@ clarification, where a question that varies between runs is itself a kind of
 ambiguity, but judging which caveats are real is the one place in the pipeline
 where reasoning is worth paying for.
 
-**Milestone 10 was not built, and that is the result.** Zero validation
+**The repair attempt was not built, and that is the result.** Zero validation
 failures, zero execution failures across 18 questions. The repair loop had a
 condition attached to it from the start, and the condition did not fire. It
 would have been easy to build it anyway and call the iteration more complete;
 what makes it a decision rather than laziness is that the trigger is written
 down — a recorded run that fails at `validate` or `execute`.
+
+
+## Milestone 10 — where vagueness ends and missing data begins
+
+*Iteration 3, first of three. Scope for the iteration was fixed before any
+code: this, the modelling assumption behind a number (11), and follow-up
+questions with bounded history (12). Review text and the agent loop are out.*
+
+- **Attempted.** Move "how are we doing recently?" from `UNSUPPORTED` (0.67)
+  to `AMBIGUOUS` by changing the classifier's criteria text and nothing else.
+  No code path, no new call, no new parameter — the only diff in `classify.py`
+  is inside two strings.
+- **Where AI helped.** Drafting the criteria wording, and pushing back that a
+  prompt change to the thing the eval measures only counts if it is recorded
+  as its own before/after run rather than argued for.
+- **What I decided.** Widen `AMBIGUOUS` to cover an undefined *period*, not
+  just an undefined metric, and make `UNSUPPORTED` say what it is actually
+  about: what the data **lacks**, not how loosely the question is worded. I
+  rejected thresholding confidence for the second time (question 12 still sits
+  low), and rejected relaxing question 8's reference so the remaining failure
+  would disappear — that reference is the only evidence the limitation exists.
+- **What failed.** The first widening was too wide: "how will we be doing next
+  quarter?" moved to `AMBIGUOUS` as well. A control test written alongside the
+  change caught it; re-reading the prompt had not, and would not have. The
+  criteria now carve forecasts out explicitly — the label is only ever for a
+  choice the *data* could make. Question 12 ("orders in 2030") is the case
+  that carve-out could have broken, and it still passes, which is the only
+  reason I trust the wording.
+- **Result.** 16/18 → 17/18, classification 17/18 → 18/18, question 16 from
+  0.67 `UNSUPPORTED` to 0.95 `AMBIGUOUS`, nothing else moved. Question 8 is
+  the only remaining failure.
+- **Learned.** A prompt change needs controls on the side you are *not* trying
+  to move. Without them you trade one misclassification for another and the
+  headline score hides the swap, because it only counts the net. Separately,
+  and measured rather than assumed: `LOAD fts` and `vss` are impossible on a
+  connection with `enable_external_access=false` (`Permission Error`, duckdb
+  1.5.6), and neither is even installed. That is what took full-text and
+  vector search over the reviews off the table — the remaining honest route
+  would have been embeddings in a plain column ranked with core
+  `list_cosine_similarity`, which is real work rather than a flag.

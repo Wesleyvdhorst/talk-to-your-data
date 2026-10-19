@@ -19,7 +19,7 @@ The assignment at `docs/requirements.txt` is authoritative. Work on **one milest
   values 9/10. The iteration 2 baseline is archived in
   `docs/eval_results_iteration2.md` and iteration 1 in
   `docs/eval_results_iteration1.md`.
-- **Milestone 10 (one bounded SQL repair attempt) was not built**, on
+- **The bounded SQL repair attempt was not built**, on
   purpose: the run produced zero validation and zero execution failures, so
   there is no observed limitation for it to fix. The condition for building it
   is a recorded run that fails at `validate` or `execute`.
