@@ -17,9 +17,8 @@ them is a decision worth defending rather than a knob to twiddle:
 - Thinking is left adaptive (the parameter is omitted). Effort is the control;
   its default of `high` is more than either of these calls needs. It CAN be
   turned off on this model - `thinking={"type": "between_tools"}`, accepted
-  only at effort `high` or below and with no other field alongside it - which
-  an earlier version of this comment denied. Not used yet: whether it changes
-  either call's output is a measurement for the next eval run, not a guess.
+  only at effort `high` or below and with no other field alongside it. Only
+  clarify() does (see _NO_THINKING); the SQL and answer calls keep it.
 - Structured output rather than a forced tool call: this model rejects
   tool_choice "any"/"tool" with a 400, and assistant prefill too, so the two
   usual ways to coerce bare SQL out of a model are both gone.
@@ -31,7 +30,7 @@ from typing import Any, NamedTuple, Protocol
 import anthropic
 
 MODEL = "claude-sonnet-5-5"
-SQL_EFFORT = "medium"  # guesses until milestone 5 measures them
+SQL_EFFORT = "medium"
 ANSWER_EFFORT = "low"
 CLARIFY_EFFORT = "low"
 MAX_TOKENS = 1024
