@@ -205,15 +205,6 @@ def test_the_decline_message_explains_the_scope_rather_than_apologising(conn):
     assert "demographics" in result.message
 
 
-def test_the_decline_message_names_the_tables_actually_loaded(subset_conn):
-    """With three tables loaded, claiming payments and sellers would be a lie."""
-    result = answer_question("how old are our customers?", subset_conn,
-                             client=ScriptedClient("SELECT 1"),
-                             jev=StubJev("UNSUPPORTED"))
-    assert "the tables customers, order_reviews, orders" in result.message
-    assert "payments" not in result.message
-
-
 def test_the_classification_is_kept_on_every_answer(conn, jev):
     """It is part of the trace: a wrong label has to be visible afterwards."""
     client = ScriptedClient("SELECT count(*) AS n FROM orders", "There are 4 orders.")

@@ -23,12 +23,9 @@ $0.007 for a typical answer with the prompt cache warm, $0.012 cold).
 uv sync
 ```
 
-**2. Get the data — optional.** Skip this and step 3 downloads the
+**2. Get the data.** Download the
 [Olist Brazilian E-Commerce dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce)
-for you (version 2, 42.6 MB, no Kaggle account needed) into kagglehub's cache
-and reads it from there. To use your own copy, or **only some of the
-tables**, put any of the nine CSVs in `data/`; whatever is there is loaded
-and the rest is left out:
+from Kaggle (~120 MB, not committed) and unzip all nine CSVs into `data/`:
 
 ```
 data/olist_customers_dataset.csv          data/olist_order_reviews_dataset.csv
@@ -38,14 +35,10 @@ data/olist_order_payments_dataset.csv     data/olist_sellers_dataset.csv
 data/product_category_name_translation.csv
 ```
 
-`data/` is only ever read, never written. With fewer tables the app describes
-only those to the model, drops the joins and rules that need a missing table,
-and declines questions about what is not loaded. The assignment's minimum —
-`orders`, `order_reviews` and `customers` — works on its own.
+`data/` is only ever read, never written.
 
 **3. Build the database.** Takes a few seconds and prints the row count per
-table, or `missing` for a table with no CSV. Safe to re-run: it replaces every
-table and drops the ones whose CSV is gone.
+table. Safe to re-run: it replaces every table.
 
 ```bash
 uv run python -m twyd.ingest     # -> db/olist.duckdb
@@ -79,8 +72,7 @@ point it at a different database file.
 | What you see | Fix |
 |---|---|
 | `database not found: db/olist.duckdb` | Run step 3 |
-| `no Olist CSV files in data ...` | The download failed — check the network, or do step 2 by hand |
-| A table shows `missing` in step 3 | Its CSV is not in `data/`; the filenames must match exactly |
+| `missing CSV files: ...` | Step 2 — the filenames must match exactly |
 | An auth or 401 error from the model | Step 4, and check you launched with `--env-file .env` |
 | The app answers but the number looks wrong | Open the SQL and the assumption line the answer carries; `docs/data_model.md` records the traps in this dataset |
 
@@ -109,8 +101,8 @@ those keywords.
 ## Tests
 
 ```bash
-uv run pytest                                   # 240 offline, no key needed
-uv run --env-file .env pytest -m integration    # 64 real-model tests, ~$0.40
+uv run pytest                                   # 231 offline, no key needed
+uv run --env-file .env pytest -m integration    # 58 real-model tests, ~$0.40
 ```
 
 Offline tests mock the model and run on tiny fixture CSVs. Integration tests
