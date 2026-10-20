@@ -27,8 +27,9 @@ The assignment at `docs/requirements.txt` is authoritative. Work on **one milest
   purpose: the run produced zero validation and zero execution failures, so
   there is no observed limitation for it to fix. The condition for building it
   is a recorded run that fails at `validate` or `execute`.
-- **Next gate:** iteration 3, driven by the two failures in the current run
-  and the limitations in `README.md`.
+- **Extras, after iteration 3:** milestone 13 (cost and cache meter) and
+  milestone 14 (auto chart) done. See the section at the end of the
+  iterations.
 
 Update this section upon completion of a milestone. Record implementation decisions in `docs/dev_notes.md`.
 
@@ -285,6 +286,58 @@ safety story. The first is real work; the second is not on the table.
 to question 16, the assumption (11) to question 8, follow-ups (12) to the
 clarification dead end iteration 2 shipped with. Items 4 and 5 were not built,
 and the reasons are above rather than implied.
+
+---
+
+# Extras — bonus directions from the assignment
+
+Two picked, one milestone each: a cost and cache meter (13), then a chart
+chosen from the shape of the result (14). Semantic search over reviews stays
+out for the reasons in iteration 3.
+
+## Milestone 13 — cost and cache meter (done)
+
+**Prompted by a finding, not a feature list.** The design talked about prompt
+caching - history goes in the user message so it cannot invalidate the cached
+schema - but no request ever set `cache_control`, and the API caches nothing
+unasked. Measure first, then fix, then measure again:
+
+1. **Meter.** `pipeline._Metered` wraps the Claude client for one question and
+   records `response.usage` from every call through it, so `llm.py` did not
+   change shape. `Answer.usage` holds one `Usage` per call, `Answer.cost_usd`
+   prices it at `PRICE_PER_MTOK`, the trace gets a `cost` line and the eval a
+   cost column plus a cache-read total. Jev is not counted ($0.042/MTok).
+2. **Before:** 21/21, $0.1810, **0** tokens read from cache.
+3. **Fix:** one cache breakpoint closing the SQL and clarify system prompts
+   (rules plus schema, the same bytes every question), 5-minute TTL.
+4. **After:** 21/21, $0.1154 (-36%), 38,073 tokens read from cache. Only the
+   first question writes the cache (2,619 tokens).
+
+**Open, and the next lever:** the answer call is still uncached, ~2,450
+tokens per answered question, because its schema comes *after* the result
+rows in the user message. Moving it into a cached system block is a prompt
+change that could move answers, so it waits for a reason beyond cost.
+
+## Milestone 14 — a chart from the shape of the result (done)
+
+`chart.py`, pure and Streamlit-free: `chart_for(columns, rows)` returns a
+`Chart(kind, x, ys)` or None, decided by types alone. The first column is x;
+every all-numeric column after it is a candidate y. Time on x (a date, or a
+`YYYY-MM` / `YYYY-MM-DD` string) is a line; up to 50 categories is a bar;
+anything else, and any single-row result, gets no chart. `app.py` draws one y
+at a time with a selector, defaulting to the last numeric column.
+
+**Two things the real run corrected, not the tests:**
+- The default column. "First numeric" drew `review_count` - the column that
+  qualifies a category - instead of `avg_review_score`, the one asked about.
+  Both multi-measure examples put the qualifier first, so the default is now
+  the last. A habit of the generated SQL, recorded as such in `Chart`.
+- The axis. Month strings sat on a category axis, where a month with no
+  orders (2016-11) disappears and the line looks unbroken. `series()` turns
+  them into dates, so the axis is temporal and the gap shows.
+
+`st.bar_chart(sort=False)` keeps the query's ORDER BY - verified on
+Streamlit 1.66, so a "worst first" result stays worst first.
 
 ---
 

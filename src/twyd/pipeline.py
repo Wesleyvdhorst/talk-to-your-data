@@ -19,6 +19,7 @@ and stay ignorant of what produced it.
 from dataclasses import dataclass
 from typing import Any, NamedTuple, Sequence
 
+import anthropic
 import duckdb
 
 from twyd.classify import AMBIGUOUS, UNSUPPORTED, Classification, classify
@@ -85,6 +86,52 @@ def history_block(turns: Sequence[Turn]) -> str:
     return ""
 
 
+# What one Claude call cost, from response.usage. `input` is the UNCACHED
+# input only: the API reports cached tokens separately, never inside it.
+class Usage(NamedTuple):
+    input: int
+    output: int
+    cache_write: int
+    cache_read: int
+
+
+# $ per million tokens, in Usage's field order, for llm.MODEL (Sonnet 5.5).
+# From the claude-api skill's price table, cached 2026-10-06: input $2,
+# output $10, a 5-minute cache write 1.25x input, a cache read $0.20. Change
+# these with the model; nothing checks that they agree.
+PRICE_PER_MTOK = Usage(input=2.00, output=10.00, cache_write=2.50, cache_read=0.20)
+
+
+class _Metered:
+    """The Claude client, plus a record of what every call through it used.
+
+    One per question, so the record is that question's and nothing else's.
+    llm.py never knows it is there: it calls messages.create exactly as before,
+    which is why no function in it had to change its return type to report
+    tokens. Jev's calls are not counted - at $0.042/MTok they are noise.
+    """
+
+    def __init__(self, client: Any):
+        self._client = client
+        self.messages = self
+        self.calls: list[Usage] = []
+
+    def create(self, **kwargs: Any) -> Any:
+        response = self._client.messages.create(**kwargs)
+        u = response.usage
+        # The SDK types the cache fields as optional; absent means no tokens
+        # were cached, so None is recorded as 0 rather than as a gap.
+        self.calls.append(
+            Usage(
+                input=u.input_tokens,
+                output=u.output_tokens,
+                cache_write=u.cache_creation_input_tokens or 0,
+                cache_read=u.cache_read_input_tokens or 0,
+            )
+        )
+        return response
+
+
 @dataclass(frozen=True)
 class Answer:
     """Everything the pipeline learned, including how it failed.
@@ -110,6 +157,9 @@ class Answer:
     message: str | None = None
     error: str | None = None
     stage: str | None = None  # generate | validate | execute, or classify
+    # One entry per Claude call this question made, in order. Empty when it
+    # was declined before reaching Claude.
+    usage: tuple[Usage, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -135,13 +185,36 @@ class Answer:
         )
 
     @property
+    def cost_usd(self) -> float:
+        """What this question's Claude calls cost, at PRICE_PER_MTOK."""
+        return sum(
+            tokens * price
+            for call in self.usage
+            for tokens, price in zip(call, PRICE_PER_MTOK)
+        ) / 1_000_000
+
+    @property
     def trace(self) -> list[tuple[str, str]]:
-        """Every stage the question passed through, as (stage, what happened).
+        """Every stage the question passed through, as (stage, what happened),
+        and what it cost when it reached Claude.
 
         Derived rather than recorded: each step's outcome is already implied by
         the fields above, and a second parallel record of it would be one more
         thing that can disagree with what actually ran.
         """
+        steps = self._stages()
+        if self.usage:
+            total = Usage(*map(sum, zip(*self.usage)))
+            steps.append((
+                "cost",
+                f"{len(self.usage)} call{'' if len(self.usage) == 1 else 's'}, "
+                f"{total.input:,} in / {total.output:,} out, "
+                f"{total.cache_read:,} cache read / {total.cache_write:,} written, "
+                f"${self.cost_usd:.4f}",
+            ))
+        return steps
+
+    def _stages(self) -> list[tuple[str, str]]:
         steps: list[tuple[str, str]] = []
         if self.classification:
             c = self.classification
@@ -219,6 +292,9 @@ def answer_question(
         )
 
     context = schema_context(conn)
+    # Only now: an UNSUPPORTED question never reaches Claude, so it needs no
+    # client. Every Claude call below goes through this one and is counted.
+    client = _Metered(client or anthropic.Anthropic())
 
     if classification.label == AMBIGUOUS:
         # The classifier decided *that* the question is underspecified; this
@@ -229,6 +305,7 @@ def answer_question(
             classification=classification,
             message=clarify(question, context, client=client),
             stage="clarify",
+            usage=tuple(client.calls),
         )
     sql, assumption = generate_sql(question, context, client=client, history=past)
 
@@ -242,6 +319,7 @@ def answer_question(
             assumption=assumption,
             error=str(exc),
             stage="validate",
+            usage=tuple(client.calls),
         )
 
     try:
@@ -254,6 +332,7 @@ def answer_question(
             assumption=assumption,
             error=str(exc),
             stage="execute",
+            usage=tuple(client.calls),
         )
 
     answer = generate_answer(
@@ -277,4 +356,5 @@ def answer_question(
         assumption=assumption,
         result=result,
         answer=answer,
+        usage=tuple(client.calls),
     )

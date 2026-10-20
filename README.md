@@ -3,6 +3,8 @@
 Ask a question in plain language. The app writes DuckDB SQL, validates it,
 runs it read-only against the Olist Brazilian e-commerce dataset, and explains
 the result from the rows it got back.
+When the rows have a time or category axis it also draws a chart, chosen
+from the column types rather than by the model.
 
 It answers, asks back, or declines — and says which. A question it cannot
 answer from the data ("what is our profit margin?") is refused rather than
@@ -12,7 +14,8 @@ best products?") gets a clarifying question instead of a silent choice.
 ## Running it
 
 **You need:** Python 3.14 via [`uv`](https://docs.astral.sh/uv/), an Anthropic
-API key, and the Olist CSVs. Costs about $0.01 per question.
+API key, and the Olist CSVs. Costs under a cent per question (measured:
+$0.007 for a typical answer with the prompt cache warm, $0.012 cold).
 
 **1. Install.**
 

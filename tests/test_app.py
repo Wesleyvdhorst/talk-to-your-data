@@ -174,3 +174,45 @@ def test_the_ui_keeps_no_second_account_of_the_conversation():
     is derived rather than recorded."""
     source = (Path(__file__).parent.parent / "src" / "twyd" / "app.py").read_text()
     assert "history=tuple(a.turn for a in st.session_state.answers)" in source
+
+
+# The chart (milestone 14): drawn from the result's shape, never asked for.
+
+
+def _answer_with(monkeypatch, columns, rows):
+    from twyd.db import QueryResult
+    from twyd.pipeline import Answer
+
+    def fake(question, conn, client=None, jev=None, history=()):
+        return Answer(question=question, sql="SELECT 1", answer="An answer.",
+                      result=QueryResult(columns=columns, rows=rows))
+
+    monkeypatch.setattr("twyd.pipeline.answer_question", fake)
+
+
+def _charts(app):
+    return app.get("vega_lite_chart")
+
+
+def test_a_monthly_result_gets_a_chart_and_a_choice_of_column(app, monkeypatch):
+    _answer_with(monkeypatch, ["month", "orders", "late_share"],
+                 [("2017-01", 800, 0.05), ("2017-02", 1780, 0.07)])
+    app.run()
+    app.chat_input[0].set_value("orders and share late per month").run()
+    assert not app.exception
+    assert len(_charts(app)) == 1
+    assert app.selectbox[0].options == ["orders", "late_share"]
+    # The measure, not the count: the last numeric column is the default.
+    assert app.selectbox[0].value == "late_share"
+    # Switching column redraws on the rerun, without asking anything again.
+    app.selectbox[0].select("orders").run()
+    assert not app.exception
+    assert len(_charts(app)) == 1
+
+
+def test_a_single_number_gets_no_chart(app, monkeypatch):
+    _answer_with(monkeypatch, ["customers"], [(96096,)])
+    app.run()
+    app.chat_input[0].set_value("how many customers?").run()
+    assert not app.exception
+    assert len(_charts(app)) == 0
