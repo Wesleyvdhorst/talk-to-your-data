@@ -53,7 +53,10 @@ _CRITERIA = {
         "zero. A value that has to be COMPUTED from the listed columns also "
         "belongs here - a difference between two timestamps, a sum, a ratio, "
         "a share - because the column does not have to exist ready-made for "
-        "the question to be answerable."
+        "the question to be answerable. A question that only makes sense as a "
+        "follow-up ('and in 2018?', 'break that down by state') belongs here "
+        "when the earlier turns supply what it leaves out - read it as the "
+        "earlier question with that one change applied."
     ),
     AMBIGUOUS: (
         "A question about this data whose answer depends on a choice the "
@@ -66,7 +69,10 @@ _CRITERIA = {
         "under unsupported: these tables can answer it once the metric and "
         "the period are chosen, so asking which was meant is more use than "
         "declining. Or an entity that could mean more than one thing in this "
-        "data. This label is only ever for a choice the DATA could make. A "
+        "data. A follow-up whose missing piece the earlier turns do NOT supply "
+        "belongs here as well: 'and for late deliveries?' with nothing before "
+        "it names no measure at all. This label is only ever for a choice the "
+        "DATA could make. A "
         "question asking what WILL happen, or for a forecast or a projection "
         "('how will we be doing next quarter?'), is unsupported however "
         "vaguely it is worded, because no choice of metric or period would "
@@ -140,7 +146,7 @@ class Classification:
 
 
 def classify(
-    question: str, columns: str = "", client: Any | None = None
+    question: str, columns: str = "", client: Any | None = None, history: str = ""
 ) -> Classification:
     """Label a question. Spends nothing on input that code can already judge.
 
@@ -148,6 +154,12 @@ def classify(
     columns. It is optional so this module needs no database to be tested, but
     the pipeline always passes it: without it the classifier guesses from table
     names.
+
+    `history` is the earlier turns, already rendered by pipeline.history_block.
+    A string rather than a list of turns, so this module keeps knowing nothing
+    about conversations - it classifies whatever state it is handed. It is
+    needed because "and in 2018?" is not a question on its own: without the
+    previous turn the only honest label for it is AMBIGUOUS.
 
     Errors from the API propagate: a missing key or an unreachable service is
     a problem with the app, not an UNSUPPORTED question, and silently
@@ -164,11 +176,14 @@ def classify(
         )
 
     questions = _question(columns)
+    # The current question goes last and is labelled, so the model is never in
+    # doubt about which one it is judging.
+    state = f"{history}\n\nCURRENT QUESTION: {question}" if history else question
     if client is None:
         with TypeSafeClient(model=MODEL) as owned:
-            response = owned.system_one(state=question, questions=questions)
+            response = owned.system_one(state=state, questions=questions)
     else:
-        response = client.system_one(state=question, questions=questions)
+        response = client.system_one(state=state, questions=questions)
 
     answer = response.choices["label"]
     return Classification(

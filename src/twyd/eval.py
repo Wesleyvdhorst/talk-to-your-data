@@ -32,6 +32,10 @@ class Question:
     None for a question that should be declined - there is nothing to execute.
     Neither is ever a hard-coded number: both are run against the live database
     at eval time, so rebuilding it moves the references with it.
+
+    `prior` is the turns asked before the graded one, through the same
+    pipeline, so the history the graded question sees is the real thing rather
+    than a hand-written transcript. Each prior turn costs a real call.
     """
 
     id: int
@@ -40,6 +44,7 @@ class Question:
     expected_label: str
     reference: str | None = None
     reference_rows: str | None = None
+    prior: tuple[str, ...] = ()
 
 
 QUESTIONS = [
@@ -160,6 +165,32 @@ QUESTIONS = [
            )
            SELECT avg(f) FROM per_order""",
     ),
+    # New in iteration 3, written before the first run of this version. Each
+    # one needs history to be answerable at all, which is the point.
+    Question(
+        19,
+        "and in 2018?",
+        "follow-up: the previous question with one thing changed",
+        ANSWERABLE,
+        "SELECT count(*) FROM orders WHERE year(order_purchase_timestamp) = 2018",
+        prior=("How many orders were placed in 2017?",),
+    ),
+    Question(
+        20,
+        "by revenue",
+        "the clarification loop closing: an answered clarification is a turn",
+        ANSWERABLE,
+        # Graded on the label alone. A reference value here would grade which
+        # column the model chose to return (product_id, category, a top-10
+        # list), not whether the follow-up worked.
+        prior=("What are the best products?",),
+    ),
+    Question(
+        21,
+        "and for late deliveries?",
+        "a follow-up with nothing to follow: must ask, not guess",
+        AMBIGUOUS,
+    ),
 ]
 
 
@@ -254,8 +285,20 @@ def run_eval(conn, client: Any | None = None, jev: Any | None = None) -> list[Re
             if question.reference_rows
             else None
         )
+        # The prior turns run first, through the same pipeline, and their
+        # outcomes become the history the graded question sees. Not timed and
+        # not graded: they are setup, and the turn under test is the last one.
+        history = []
+        for earlier in question.prior:
+            history.append(
+                answer_question(
+                    earlier, conn, client=client, jev=jev, history=tuple(history)
+                ).turn
+            )
         started = time.monotonic()
-        answer = answer_question(question.question, conn, client=client, jev=jev)
+        answer = answer_question(
+            question.question, conn, client=client, jev=jev, history=tuple(history)
+        )
         seconds = time.monotonic() - started
         results.append(
             Result(

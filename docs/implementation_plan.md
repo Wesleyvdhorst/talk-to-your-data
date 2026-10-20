@@ -9,15 +9,17 @@ The assignment at `docs/requirements.txt` is authoritative. Work on **one milest
 
 ## Current progress
 
-- **Active product iteration:** 3 — the final touches, in progress
-- **Implementation milestones 1–11 done.** Iteration 1 shipped the linear
+- **Active product iteration:** 3 — the final touches, complete
+- **Implementation milestones 1–12 done.** Iteration 1 shipped the linear
   pipeline and a recorded baseline; iteration 2 added grounded claims about
   results (6), classification before SQL (7), clarification and an
   inspectable trace (8), and a graded eval covering all of it (9). Iteration 3
-  opened with the borderline classification (10) and the modelling
-  assumption behind a number (11).
-- **Latest run: 17/18** (`docs/eval_results.md`). Classification 18/18,
-  values 9/10. The iteration 2 baseline is archived in
+  closed with the borderline classification (10), the modelling assumption
+  behind a number (11) and follow-up questions (12).
+- **Latest run: 21/21** (`docs/eval_results.md`). Classification 21/21,
+  values 11/11 — but question 8 passed this run and failed the previous one
+  with nothing changed between them, which is the limitation itself rather
+  than a fix. Read it before quoting the score. The iteration 2 baseline is archived in
   `docs/eval_results_iteration2.md` and iteration 1 in
   `docs/eval_results_iteration1.md`.
 - **The bounded SQL repair attempt was not built**, on
@@ -248,17 +250,26 @@ safety story. The first is real work; the second is not on the table.
    an integration test written as a control, so the criteria now carve out
    forecasts explicitly. Recorded as its own before/after run: 16/18 to 17/18,
    classification 17/18 to 18/18, nothing else moved.
-3. **Follow-up questions**, moved from iteration 2. A question may refer to
-   the previous one: "and for late deliveries?", "break that down by state".
-   Requirements unchanged from the earlier plan:
-   - A **hard cap** on history length, in turns and tokens. Old turns are
-     dropped, not summarised.
+3. **Follow-up questions — done, milestone 12.** Built as specified below,
+   and the clarification dead end is closed: "What are the best products?"
+   asks which reading, "by revenue" answers it, and the second turn produces
+   its own validated SQL. Three new eval questions cover it (19-21), all
+   passing. What was built:
+   - A **hard cap** on history length: 3 turns **and** 2,000 characters, both
+     enforced in `pipeline.history_block()`. Old turns are dropped, oldest
+     first, never summarised. Turns alone would not bound cost - three turns
+     of 2,000-character SQL is a different prompt from three of 300.
    - Each turn produces its own validated SQL and its own grounded answer.
      History informs generation; it never licenses reusing an earlier result
      as this question's evidence.
    - An unresolvable follow-up is `AMBIGUOUS` and asks.
    - The clarification flow and the follow-up flow are the same mechanism: an
      answered clarification *is* a follow-up turn.
+   - One decision the plan did not anticipate: history goes in the **user**
+     message, never the system prompt. The system prompt is the cacheable
+     prefix, and earlier turns are the user's own text - in the system prompt
+     they would carry operator authority, which is how a question talks the
+     rules out of a model.
 4. **Review text.** Route among `SQL_ONLY`, `REVIEW_TEXT` and `HYBRID`, and
    add semantic search over the Portuguese `review_comment_message` (~41% of
    reviews have one). Routing is decided per turn, never inherited. A
@@ -268,8 +279,11 @@ safety story. The first is real work; the second is not on the table.
 5. **A bounded agent loop of 3–4 tool steps**, only if fixed routing
    demonstrably fails. Still unjustified.
 
-**Outcome:** more expressive data interaction, with each addition traceable to
-a failure in a recorded run.
+**Outcome:** 21/21 on the 21-question set, from 16/18 at the end of iteration
+2. Every addition traceable to a recorded failure: the borderline label (10)
+to question 16, the assumption (11) to question 8, follow-ups (12) to the
+clarification dead end iteration 2 shipped with. Items 4 and 5 were not built,
+and the reasons are above rather than implied.
 
 ---
 

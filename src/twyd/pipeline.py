@@ -9,10 +9,15 @@ produced `SELECT 'your question looks like random keystrokes' AS message`.
 
 Contains no UI code and opens no database: the caller owns the connection, so
 a Streamlit layer can keep one open across questions.
+
+History lives here too, and only here. `Turn` and `history_block()` are this
+module's because a follow-up is a property of the conversation, not of a
+prompt or of a classifier: the layers underneath receive the rendered string
+and stay ignorant of what produced it.
 """
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple, Sequence
 
 import duckdb
 
@@ -31,6 +36,54 @@ _UNSUPPORTED_MESSAGE = (
     "payments, reviews, products, sellers and locations - with no costs, "
     "margins, customer demographics or stock, and nothing about the future."
 )
+
+# Hard caps on how much of the past any question can see. Both of them,
+# because turns alone do not bound cost: three turns of 300-character SQL is a
+# different prompt from three turns of 2,000. Old turns are DROPPED, never
+# summarised - a summary is one more model call that can be wrong about what
+# was asked, and the point of the cap is to bound cost, not to preserve
+# meaning. The newest turn always survives: it is the one a follow-up refers to.
+MAX_HISTORY_TURNS = 3
+MAX_HISTORY_CHARS = 2000
+
+
+class Turn(NamedTuple):
+    """One past turn, as the next question is allowed to see it.
+
+    Carries the question, the SQL that answered it, and the clarification it
+    was asked - and deliberately NOT the rows. A follow-up re-derives its
+    scope by querying again; pasting an earlier result into a prompt would
+    make the second answer evidence for nothing, and every grounded claim in
+    this app comes from a result the query just produced.
+    """
+
+    question: str
+    sql: str | None = None
+    asked: str | None = None  # the clarification we sent back, if any
+
+
+def history_block(turns: Sequence[Turn]) -> str:
+    """Render recent turns for a prompt, within both caps. "" when empty.
+
+    Pure and offline: the caps are tested without a model or a database.
+    """
+    recent = list(turns)[-MAX_HISTORY_TURNS:]
+    while recent:
+        lines = []
+        for number, turn in enumerate(recent, start=1):
+            lines.append(f"{number}. Question: {turn.question}")
+            if turn.sql:
+                lines.append(f"   Answered with SQL: {' '.join(turn.sql.split())}")
+            if turn.asked:
+                lines.append(f"   We asked back: {turn.asked}")
+        block = "EARLIER TURNS IN THIS CONVERSATION\n" + "\n".join(lines)
+        if len(block) <= MAX_HISTORY_CHARS:
+            return block
+        # Over budget: drop the oldest and try again. Dropping the newest
+        # would strip exactly the turn a follow-up is about.
+        recent.pop(0)
+    return ""
+
 
 @dataclass(frozen=True)
 class Answer:
@@ -66,6 +119,20 @@ class Answer:
     def declined(self) -> bool:
         """True when the pipeline chose not to answer. Not an error."""
         return self.message is not None
+
+    @property
+    def turn(self) -> Turn:
+        """This question as the next one may see it.
+
+        Derived, like `trace`, from the fields already set, so the caller
+        appends what happened rather than reconstructing it - and so it cannot
+        record SQL that was never generated or a question never asked.
+        """
+        return Turn(
+            question=self.question,
+            sql=self.sql,
+            asked=self.message if self.stage == "clarify" else None,
+        )
 
     @property
     def trace(self) -> list[tuple[str, str]]:
@@ -117,11 +184,19 @@ def answer_question(
     conn: duckdb.DuckDBPyConnection,
     client: Any | None = None,
     jev: Any | None = None,
+    history: Sequence[Turn] = (),
 ) -> Answer:
     """Answer one question, or decline it. Returns failures as fields.
 
     `client` is the Claude client and `jev` the classifier's; both are optional
     so tests can stub either independently.
+
+    `history` is the earlier turns of this conversation, newest last, and is
+    bounded by history_block() rather than by the caller. It informs
+    classification and SQL generation and nothing else: this turn still
+    produces its own validated SQL and its own answer grounded in its own
+    result. An answered clarification is just a follow-up turn, which is why
+    there is one mechanism here and not two.
 
     Only the three failures that are part of normal operation are caught -
     unsafe SQL, a database error, a query that ran too long. Anything else
@@ -131,7 +206,8 @@ def answer_question(
     if not question or not question.strip():
         return Answer(question=question, error="the question is empty", stage="generate")
 
-    classification = classify(question, column_overview(conn), client=jev)
+    past = history_block(history)
+    classification = classify(question, column_overview(conn), client=jev, history=past)
     if classification.label == UNSUPPORTED:
         # Fixed text: the scope of the data is a fact about the data, so
         # nothing here needs a model.
@@ -154,7 +230,7 @@ def answer_question(
             message=clarify(question, context, client=client),
             stage="clarify",
         )
-    sql, assumption = generate_sql(question, context, client=client)
+    sql, assumption = generate_sql(question, context, client=client, history=past)
 
     try:
         validate(sql)

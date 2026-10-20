@@ -54,9 +54,11 @@ class AlwaysClient:
 
 
 def test_the_question_set_is_what_the_docs_promise():
-    assert len(QUESTIONS) == 18
-    assert {q.id for q in QUESTIONS} == set(range(1, 19))
-    assert len([q for q in QUESTIONS if q.reference]) == 10
+    assert len(QUESTIONS) == 21
+    assert {q.id for q in QUESTIONS} == set(range(1, 22))
+    assert len([q for q in QUESTIONS if q.reference]) == 11
+    # Three follow-ups, two of which need an earlier turn to mean anything.
+    assert [q.id for q in QUESTIONS if q.prior] == [19, 20]
     # Every question is graded on its label now, including the four that were
     # record-only when there was no classifier to grade.
     assert all(q.expected_label in ("ANSWERABLE", "AMBIGUOUS", "UNSUPPORTED") for q in QUESTIONS)
@@ -113,7 +115,7 @@ def test_a_wrong_label_fails_even_when_nothing_else_is_wrong(conn, jev):
     should have been declined is a failure - and says so."""
     results = run_eval(conn, client=AlwaysClient("SELECT count(*) FROM orders"), jev=jev)
     declined = [r for r in results if r.question.expected_label != "ANSWERABLE"]
-    assert len(declined) == 7
+    assert len(declined) == 8
     assert all(r.verdict == "FAIL" for r in declined)
     assert all("expected" in r.why for r in declined)
 
@@ -160,3 +162,19 @@ def test_the_report_names_every_question(conn, jev):
     report = as_markdown(results)
     for q in QUESTIONS:
         assert q.question in report
+
+
+def test_a_prior_turn_is_asked_first_and_becomes_the_history(conn, jev):
+    """Question 19 is "and in 2018?", which means nothing on its own. The
+    earlier turn runs through the same pipeline, so the history under test is
+    the real thing rather than a hand-written transcript."""
+    client = AlwaysClient("SELECT count(*) FROM orders")
+    results = run_eval(conn, client=client, jev=jev)
+    nineteen = next(r for r in results if r.question.id == 19)
+
+    assert nineteen.question.prior == ("How many orders were placed in 2017?",)
+    # The graded call saw the earlier question; the SQL calls carry history in
+    # the user message, so it shows up there.
+    contents = [c["messages"][0]["content"] for c in client.messages.calls]
+    assert any("How many orders were placed in 2017?" in c and "and in 2018?" in c
+               for c in contents)

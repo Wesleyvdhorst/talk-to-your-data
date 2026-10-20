@@ -16,13 +16,14 @@ uv run --env-file .env streamlit run src/twyd/app.py
 `answer_question(question, conn)` is the whole pipeline. One pass, no loops:
 
 ```
-question
+question (+ up to 3 earlier turns, capped at 2,000 characters)
   -> column overview     one line per table: its columns, ~266 tokens
-  -> classify            Jev, three labels, reasoning over those columns
+  -> classify            Jev, three labels, over those columns and the history
   -> clarify             if AMBIGUOUS: LLM call asking which reading, turn ends
                          if UNSUPPORTED: fixed scope message, turn ends
   -> schema context      built from the live database + verified semantic notes
   -> generate_sql        LLM call #1, structured output, {sql, assumption}
+                         history goes in the USER message, never the system prompt
   -> validate            parse tree: one SELECT, nine known tables, no table functions
   -> run_query           read-only DuckDB, 1,000-row cap, 30s timeout
   -> generate_answer     LLM call #2, grounded in the rows, their shape and the assumption
@@ -35,8 +36,17 @@ underspecified, and no SQL was generated), or an **error** (something broke).
 A decline is an outcome, not a failure.
 
 `Answer.trace` lists the stages the question actually passed through and is
-shown in the UI. It is derived from the fields above rather than recorded
-alongside them, so it cannot claim a stage that did not run.
+shown in the UI. `Answer.turn` is the same question as the *next* one may see
+it. Both are derived from the fields above rather than recorded alongside
+them, so neither can claim a stage that did not run or SQL that was never
+generated.
+
+A follow-up is the same mechanism as a clarification: "and in 2018?" or "by
+revenue" is answered by giving the next turn the earlier questions and the SQL
+that answered them — **never the rows**. Scope is re-derived by querying
+again, because every grounded claim in this app comes from a result its own
+query just produced. History is capped at 3 turns **and** 2,000 characters,
+oldest dropped, never summarised.
 
 | Module | Responsibility |
 |---|---|
@@ -74,19 +84,24 @@ Twelve questions, written before the first run: `docs/eval_questions.md`.
 Latest results, including every generated query: `docs/eval_results.md`.
 
 ```bash
-uv run --env-file .env python -m twyd.eval     # ~$0.12
+uv run --env-file .env python -m twyd.eval     # 21 questions, ~$0.20
 ```
 
-**8/8 graded questions correct** on the recorded run, including the traps that
-make this dataset interesting: customers counted as people rather than order
-rows (96,096, not 99,441), reviews aggregated per order before averaging,
-orders with no reviews found by anti-join (768), and lateness defined by
-timestamp rather than status.
+**21/21 on the recorded run** (classification 21/21, values 11/11), including
+the traps that make this dataset interesting: customers counted as people
+rather than order rows (96,096, not 99,441), reviews aggregated per order
+before averaging, orders with no reviews found by anti-join (768), and
+lateness defined by timestamp rather than status.
+
+**Read question 8 before believing the 21.** It passed this run and failed the
+last one, with nothing changed between them — see the first limitation below.
+The score is a snapshot of one run, which is why every run is recorded in
+full.
 
 ## Limitations
 
 Known and measured, not hypothetical. The current eval run is in
-`docs/eval_results.md` (17/18), the iteration 2 baseline in
+`docs/eval_results.md` (21/21), the iteration 2 baseline in
 `docs/eval_results_iteration2.md` and iteration 1 in
 `docs/eval_results_iteration1.md`.
 
@@ -101,9 +116,17 @@ Known and measured, not hypothetical. The current eval run is in
   the choice**: the SQL call returns an `assumption` alongside the query, and
   the answer carries it — *"that average covers all orders, including the 775
   orders with no items counted as zero items."* The number is still one of two;
-  it is no longer one of two silently. The eval still records question 8 as a
-  failure against its reference, deliberately: that failure is the evidence
-  this limitation exists.
+  it is no longer one of two silently.
+
+  **The run-to-run flip is the evidence, and it is still there.** Question 8
+  returned 1.1328 on one recorded run and 1.1417 on the next, with no change
+  to the app in between — so it failed its reference once and passed it once.
+  The reference was not relaxed and the prompt was not tuned at it. What
+  changed is that the record now says which reading each run took: *"averaged
+  only over orders that have at least one item line (the 775 orders with no
+  items are excluded)"* on the run that passed, *"including the 775 orders
+  with no items counted as zero items"* on the run that failed. A single score
+  cannot represent this question; the assumption line can.
 - **The assumption is prose, and it fires on nearly every question.** Nothing
   branches on it, and no test asserts its wording — only that it exists, stays
   a clause, and does not restate the SQL. In the recorded run all 11 answered
@@ -124,12 +147,24 @@ Known and measured, not hypothetical. The current eval run is in
   is tempting and would be wrong: "how many orders were placed in 2030?" — the
   question whose correct answer is zero — sits at 0.40–0.55, below several
   questions that are genuinely harder.
-- **A clarification ends the turn.** The user must re-ask with the measure
-  they meant; the pipeline keeps no history, so "and for late deliveries?"
-  cannot work. Follow-up questions are iteration 3.
-- **No review-text understanding.** `review_comment_message` is Portuguese and
-  present on ~41% of reviews; nothing reads it yet. Iteration 3.
-- **No SQL repair.** Deliberately absent: across 18 questions this run
+- **History is dropped, never summarised, and the app is single-session.**
+  Past the 3-turn or 2,000-character cap the oldest turn is gone, so a
+  reference back to something five questions ago fails — it becomes an
+  AMBIGUOUS question and the app asks. The transcript lives in Streamlit's
+  session state, so a browser reload starts a new conversation. Both are
+  deliberate: a summary is one more model call that can be wrong about what
+  was asked, and persistence is a database this app does not need.
+- **No review-text understanding, and it is not coming in this app.**
+  `review_comment_message` is Portuguese and present on ~41% of reviews;
+  nothing reads it. Dropped from iteration 3 on cost, and the measurement
+  behind that is worth knowing: DuckDB's `fts` and `vss` extensions **cannot
+  be loaded here at all** — `LOAD fts` on a connection with
+  `enable_external_access=false` returns `Permission Error`, and neither is
+  installed. Search over the reviews would have meant embeddings precomputed
+  into a plain column and ranked with core `list_cosine_similarity` (no vector
+  database), or relaxing the engine configuration that is half the safety
+  story. The first is real work; the second is not on the table.
+- **No SQL repair.** Deliberately absent: across 21 questions this run
   produced zero validation and zero execution failures, so there is nothing
   for a repair loop to fix. It will be built when a run shows it is needed.
 - **Answer prose is graded by reading.** The row count behind an answer is
@@ -154,8 +189,8 @@ The baseline's four recorded defects, each with the evidence:
 ## Tests
 
 ```bash
-uv run pytest                                   # 167 offline, no key needed
-uv run --env-file .env pytest -m integration    # 32 real-model tests, ~$0.25
+uv run pytest                                   # 199 offline, no key needed
+uv run --env-file .env pytest -m integration    # 40 real-model tests, ~$0.35
 ```
 
 Offline tests mock the model and run on tiny fixture CSVs. Integration tests
