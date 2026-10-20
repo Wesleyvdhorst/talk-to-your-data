@@ -25,18 +25,17 @@ import duckdb
 from twyd.classify import AMBIGUOUS, UNSUPPORTED, Classification, classify
 from twyd.db import QueryResult, run_query
 from twyd.llm import clarify, generate_answer, generate_sql
-from twyd.schema import column_overview, schema_context, table_names
+from twyd.schema import column_overview, schema_context
 from twyd.sql_guard import UnsafeSQL, validate
 
 
 # Shown when the pipeline declines. Deterministic text: nothing here needs a
 # model, and a generated apology would be one more thing that can hallucinate.
-# The tables are the ones loaded, which may be fewer than nine.
 _UNSUPPORTED_MESSAGE = (
     "This dataset cannot answer that. It holds Olist's Brazilian e-commerce "
-    "transactions from September 2016 to October 2018 - the tables {tables} - "
-    "with no costs, margins, customer demographics or stock, and nothing "
-    "about the future."
+    "transactions from September 2016 to October 2018 - orders, items, "
+    "payments, reviews, products, sellers and locations - with no costs, "
+    "margins, customer demographics or stock, and nothing about the future."
 )
 
 # Hard caps on how much of the past any question can see. Both of them,
@@ -299,7 +298,7 @@ def answer_question(
         return Answer(
             question=question,
             classification=classification,
-            message=_UNSUPPORTED_MESSAGE.format(tables=", ".join(table_names(conn))),
+            message=_UNSUPPORTED_MESSAGE,
             stage="classify",
             usage=tuple(client.calls),
         )

@@ -1,11 +1,8 @@
-"""Load the Olist CSVs into DuckDB, downloading them first if there are none.
+"""Load the Olist CSVs into DuckDB.
 
-Deterministic and idempotent: every run replaces each table from its CSV and
-drops the tables whose CSV is absent, so the resulting database depends only
-on the contents of the data directory. Any subset of the nine files loads -
-the assignment's minimum is orders, order_reviews and customers - and the
-schema context then describes only what was loaded. Nothing here ever writes
-to the data directory, and no LLM is involved.
+Deterministic and idempotent: every run replaces each table from its CSV, so
+the resulting database depends only on the contents of the data directory.
+Nothing here ever writes to that directory, and no LLM is involved.
 """
 
 from pathlib import Path
@@ -25,46 +22,17 @@ TABLES = {
     "product_category_translation": "product_category_name_translation.csv",
 }
 
-# Pinned to a version, so a download is the same nine files every time. Public:
-# kagglehub fetches it without Kaggle credentials (verified 2026-10-20, 42.6 MB).
-KAGGLE_DATASET = "olistbr/brazilian-ecommerce/versions/2"
-
-
-def find_data(data_dir: Path) -> Path:
-    """Return data_dir if it holds any Olist CSV, else download the dataset.
-
-    The download goes to kagglehub's own cache and is read from there, never
-    copied into data_dir: that directory is only ever read. A data_dir with
-    some of the files wins over a download, so loading less data on purpose
-    stays possible.
-    """
-    if any((data_dir / name).is_file() for name in TABLES.values()):
-        return data_dir
-    # Imported here: only a first run without data needs it, and the tests
-    # never do.
-    import kagglehub
-
-    return Path(kagglehub.dataset_download(KAGGLE_DATASET))
-
 
 def ingest(data_dir: Path, db_path: Path) -> dict[str, int]:
-    """Load every table in TABLES whose CSV is present. Returns {table: row_count}.
+    """Replace every table in TABLES from its CSV. Returns {table: row_count}.
 
-    A table whose CSV is absent is dropped rather than left from an earlier
-    run, so a partial database is never a stale mix. The caller reports which
-    tables are missing; the schema context leaves them out. Raises
-    FileNotFoundError when none of the CSVs is present.
+    Raises FileNotFoundError if a CSV is missing, so a partial database is
+    never silently presented as a complete one.
     """
-    paths = {
-        table: data_dir / name
-        for table, name in TABLES.items()
-        if (data_dir / name).is_file()
-    }
-    if not paths:
-        raise FileNotFoundError(
-            f"no Olist CSV files in {data_dir}; expected any of: "
-            + ", ".join(TABLES.values())
-        )
+    paths = {table: data_dir / name for table, name in TABLES.items()}
+    missing = [str(p) for p in paths.values() if not p.is_file()]
+    if missing:
+        raise FileNotFoundError(f"missing CSV files: {', '.join(sorted(missing))}")
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
     # Unlike db.connect(), this connection must reach the filesystem: it reads
@@ -81,18 +49,13 @@ def ingest(data_dir: Path, db_path: Path) -> dict[str, int]:
                 [str(path)],
             )
             counts[table] = conn.sql(f"SELECT count(*) FROM {table}").fetchone()[0]
-        for table in TABLES.keys() - paths.keys():
-            conn.execute(f"DROP TABLE IF EXISTS {table}")  # noqa: S608 - names are from TABLES
     return counts
 
 
 if __name__ == "__main__":
     import sys
 
-    source = find_data(Path("data"))
-    print(f"Reading CSVs from {source}", file=sys.stderr)
-    counts = ingest(source, Path("db/olist.duckdb"))
-    for table in TABLES:
-        n = f"{counts[table]:>9,}" if table in counts else "  missing - not loaded"
-        print(f"{table:30} {n}", file=sys.stderr)
+    counts = ingest(Path("data"), Path("db/olist.duckdb"))
+    for table, n in counts.items():
+        print(f"{table:30} {n:>9,}", file=sys.stderr)
     print(f"\nWrote db/olist.duckdb ({sum(counts.values()):,} rows)", file=sys.stderr)
