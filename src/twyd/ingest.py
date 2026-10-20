@@ -50,3 +50,12 @@ def ingest(data_dir: Path, db_path: Path) -> dict[str, int]:
             )
             counts[table] = conn.sql(f"SELECT count(*) FROM {table}").fetchone()[0]
     return counts
+
+
+if __name__ == "__main__":
+    import sys
+
+    counts = ingest(Path("data"), Path("db/olist.duckdb"))
+    for table, n in counts.items():
+        print(f"{table:30} {n:>9,}", file=sys.stderr)
+    print(f"\nWrote db/olist.duckdb ({sum(counts.values()):,} rows)", file=sys.stderr)

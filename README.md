@@ -1,190 +1,88 @@
 # Talk with your data — Olist
 
 Ask a question in plain language. The app writes DuckDB SQL, validates it,
-runs it read-only, and explains the result from the rows it got back.
+runs it read-only against the Olist Brazilian e-commerce dataset, and explains
+the result from the rows it got back.
+
+It answers, asks back, or declines — and says which. A question it cannot
+answer from the data ("what is our profit margin?") is refused rather than
+guessed at, and a question with more than one honest reading ("what are the
+best products?") gets a clarifying question instead of a silent choice.
+
+## Running it
+
+**You need:** Python 3.14 via [`uv`](https://docs.astral.sh/uv/), an Anthropic
+API key, and the Olist CSVs. Costs about $0.01 per question.
+
+**1. Install.**
 
 ```bash
 uv sync
-# the nine Olist CSVs go in data/ (not committed, ~120 MB)
-uv run python -c "from pathlib import Path; from twyd.ingest import ingest; print(ingest(Path('data'), Path('db/olist.duckdb')))"
-printf 'ANTHROPIC_API_KEY=...\nTYPESAFE_API_KEY=...\n' > .env
+```
+
+**2. Get the data.** Download the
+[Olist Brazilian E-Commerce dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce)
+from Kaggle (~120 MB, not committed) and unzip all nine CSVs into `data/`:
+
+```
+data/olist_customers_dataset.csv          data/olist_order_reviews_dataset.csv
+data/olist_geolocation_dataset.csv        data/olist_orders_dataset.csv
+data/olist_order_items_dataset.csv        data/olist_products_dataset.csv
+data/olist_order_payments_dataset.csv     data/olist_sellers_dataset.csv
+data/product_category_name_translation.csv
+```
+
+`data/` is only ever read, never written.
+
+**3. Build the database.** Takes a few seconds and prints the row count per
+table. Safe to re-run: it replaces every table.
+
+```bash
+uv run python -m twyd.ingest     # -> db/olist.duckdb
+```
+
+**4. Add your API keys.** Copy `.env.example` to `.env` and fill in both:
+
+```bash
+cp .env.example .env
+```
+
+`ANTHROPIC_API_KEY` writes the SQL and the answer; `TYPESAFE_API_KEY` runs the
+classifier. Keys are read from the environment and never committed.
+
+**5. Run.**
+
+```bash
 uv run --env-file .env streamlit run src/twyd/app.py
 ```
 
-## How it works
+It opens on `127.0.0.1:8501` with example questions to click. Set `TWYD_DB` to
+point it at a different database file.
 
-`answer_question(question, conn)` is the whole pipeline. One pass, no loops:
+### If something goes wrong
 
-```
-question (+ up to 3 earlier turns, capped at 2,000 characters)
-  -> column overview     one line per table: its columns, ~266 tokens
-  -> classify            Jev, three labels, over those columns and the history
-  -> clarify             if AMBIGUOUS: LLM call asking which reading, turn ends
-                         if UNSUPPORTED: fixed scope message, turn ends
-  -> schema context      built from the live database + verified semantic notes
-  -> generate_sql        LLM call #1, structured output, {sql, assumption}
-                         history goes in the USER message, never the system prompt
-  -> validate            parse tree: one SELECT, nine known tables, no table functions
-  -> run_query           read-only DuckDB, 1,000-row cap, 30s timeout
-  -> generate_answer     LLM call #2, grounded in the rows, their shape and the assumption
-  -> Answer(classification, sql, assumption, result, answer, message, error, stage)
-```
-
-Three outcomes, kept apart: an **answer** (grounded in a result), a
-**message** (the pipeline declined or asked back - unsupported or
-underspecified, and no SQL was generated), or an **error** (something broke).
-A decline is an outcome, not a failure.
-
-`Answer.trace` lists the stages the question actually passed through and is
-shown in the UI. `Answer.turn` is the same question as the *next* one may see
-it. Both are derived from the fields above rather than recorded alongside
-them, so neither can claim a stage that did not run or SQL that was never
-generated.
-
-A follow-up is the same mechanism as a clarification: "and in 2018?" or "by
-revenue" is answered by giving the next turn the earlier questions and the SQL
-that answered them — **never the rows**. Scope is re-derived by querying
-again, because every grounded claim in this app comes from a result its own
-query just produced. History is capped at 3 turns **and** 2,000 characters,
-oldest dropped, never summarised.
-
-| Module | Responsibility |
+| What you see | Fix |
 |---|---|
-| `ingest.py` | CSVs → DuckDB, deterministic, no LLM |
-| `db.py` | read-only connections, execution, row cap, timeout |
-| `schema.py` | the prompt's schema context: columns introspected, semantics hand-written |
-| `sql_guard.py` | treats generated SQL as untrusted; allowlist over the parse tree |
-| `classify.py` | ANSWERABLE / AMBIGUOUS / UNSUPPORTED from the column list, before any SQL exists |
-| `llm.py` | both Claude calls; the only file that knows that provider |
-| `pipeline.py` | wires the above; returns failures as fields, never as empty results |
-| `app.py` | thin Streamlit layer; contains no logic |
-| `eval.py` | the fixed evaluation set and its runner |
+| `database not found: db/olist.duckdb` | Run step 3 |
+| `missing CSV files: ...` | Step 2 — the filenames must match exactly |
+| An auth or 401 error from the model | Step 4, and check you launched with `--env-file .env` |
+| The app answers but the number looks wrong | Open the SQL and the assumption line the answer carries; `docs/data_model.md` records the traps in this dataset |
 
-Safety is enforced twice, independently. The **engine** opens DuckDB with
-`read_only=True` and `enable_external_access=false` — the second matters,
-because on a plain read-only connection `COPY ... TO` writes a real file and
-`read_csv('/etc/passwd')` reads one. The **validator** then requires exactly
-one statement that parses as `SELECT`, references only the nine ingested
-tables, and calls no table functions. It is an allowlist over DuckDB's own
-parse tree, not a keyword blocklist, because `SELECT * FROM 'secrets.csv'`
-contains no suspicious keyword at all.
+Delete `db/` and redo step 3 at any time; nothing else depends on it.
 
-## Model settings
+## What to ask it
 
-`claude-sonnet-5-5`, effort `medium` for SQL and `low` for prose, adaptive
-thinking, structured output for the SQL. About **$0.01 per question**.
+The examples in the app have all been run through the pipeline at least once.
+Questions that work well are concrete and single-purpose:
 
-This model rejects `temperature`, forced `tool_choice` and assistant prefill
-with a 400 — all three being the usual ways to pin down text-to-SQL output —
-so the output schema does that work instead.
+- *How many customers does the company have?* (96,096 people, not 99,441 order rows)
+- *What is the average review score for late deliveries?*
+- *Which sellers have the most late deliveries, and what is their average review score?*
+- *For each month, how many orders were placed and what share of them arrived late?*
 
-## Evaluation
-
-Twelve questions, written before the first run: `docs/eval_questions.md`.
-Latest results, including every generated query: `docs/eval_results.md`.
-
-```bash
-uv run --env-file .env python -m twyd.eval     # 21 questions, ~$0.20
-```
-
-**21/21 on the recorded run** (classification 21/21, values 11/11), including
-the traps that make this dataset interesting: customers counted as people
-rather than order rows (96,096, not 99,441), reviews aggregated per order
-before averaging, orders with no reviews found by anti-join (768), and
-lateness defined by timestamp rather than status.
-
-**Read question 8 before believing the 21.** It passed this run and failed the
-last one, with nothing changed between them — see the first limitation below.
-The score is a snapshot of one run, which is why every run is recorded in
-full.
-
-## Limitations
-
-Known and measured, not hypothetical. The current eval run is in
-`docs/eval_results.md` (21/21), the iteration 2 baseline in
-`docs/eval_results_iteration2.md` and iteration 1 in
-`docs/eval_results_iteration1.md`.
-
-- **Semantic ambiguity is surfaced, not detected.** The classifier reliably
-  spots an undefined *word* — "best", "perform best" — but not a question that
-  reads precisely and still depends on a modelling choice. "What is the
-  average number of items per order?" is labelled ANSWERABLE at 0.98 and
-  returns 1.1328 (all 99,441 orders, zero-item orders counted as zero) where
-  the reference says 1.1417 (only the 98,666 orders that have items). Both are
-  defensible readings of one sentence, so the app does not ask — asking about
-  every denominator would make it useless. What it does instead is **state
-  the choice**: the SQL call returns an `assumption` alongside the query, and
-  the answer carries it — *"that average covers all orders, including the 775
-  orders with no items counted as zero items."* The number is still one of two;
-  it is no longer one of two silently.
-
-  **The run-to-run flip is the evidence, and it is still there.** Question 8
-  returned 1.1328 on one recorded run and 1.1417 on the next, with no change
-  to the app in between — so it failed its reference once and passed it once.
-  The reference was not relaxed and the prompt was not tuned at it. What
-  changed is that the record now says which reading each run took: *"averaged
-  only over orders that have at least one item line (the 775 orders with no
-  items are excluded)"* on the run that passed, *"including the 775 orders
-  with no items counted as zero items"* on the run that failed. A single score
-  cannot represent this question; the assumption line can.
-- **The assumption is prose, and it fires on nearly every question.** Nothing
-  branches on it, and no test asserts its wording — only that it exists, stays
-  a clause, and does not restate the SQL. In the recorded run all 11 answered
-  questions produced one, several of them genuinely load-bearing ("orders with
-  multiple reviews count once per review"), and some closer to boilerplate
-  ("every order regardless of status"). Tightening it to *consequential*
-  choices only would need a measure of consequence, which is the harder
-  problem it is standing in for.
-- **Vagueness and missing data overlap, and the boundary is prompt-written.**
-  "How are we doing recently?" was UNSUPPORTED at 0.67 in iteration 2 and is
-  AMBIGUOUS at 0.95 now, after the criteria were told that vagueness is about
-  a choice the data *could* make while unsupported is about what the data
-  lacks. Widening it that far first pulled "how will we be doing next
-  quarter?" across with it, so the criteria carry an explicit carve-out for
-  forecasts. The boundary holds because two integration tests pin both sides
-  of it, not because the wording is self-evident.
-- **The classifier's confidence is recorded, never acted on.** Thresholding it
-  is tempting and would be wrong: "how many orders were placed in 2030?" — the
-  question whose correct answer is zero — sits at 0.40–0.55, below several
-  questions that are genuinely harder.
-- **History is dropped, never summarised, and the app is single-session.**
-  Past the 3-turn or 2,000-character cap the oldest turn is gone, so a
-  reference back to something five questions ago fails — it becomes an
-  AMBIGUOUS question and the app asks. The transcript lives in Streamlit's
-  session state, so a browser reload starts a new conversation. Both are
-  deliberate: a summary is one more model call that can be wrong about what
-  was asked, and persistence is a database this app does not need.
-- **No review-text understanding, and it is not coming in this app.**
-  `review_comment_message` is Portuguese and present on ~41% of reviews;
-  nothing reads it. Dropped from iteration 3 on cost, and the measurement
-  behind that is worth knowing: DuckDB's `fts` and `vss` extensions **cannot
-  be loaded here at all** — `LOAD fts` on a connection with
-  `enable_external_access=false` returns `Permission Error`, and neither is
-  installed. Search over the reviews would have meant embeddings precomputed
-  into a plain column and ranked with core `list_cosine_similarity` (no vector
-  database), or relaxing the engine configuration that is half the safety
-  story. The first is real work; the second is not on the table.
-- **No SQL repair.** Deliberately absent: across 21 questions this run
-  produced zero validation and zero execution failures, so there is nothing
-  for a repair loop to fix. It will be built when a run shows it is needed.
-- **Answer prose is graded by reading.** The row count behind an answer is
-  checked deterministically (question 17), but whether a caveat is well judged
-  is not something a test here asserts.
-- **Single user, localhost.** The app binds to `127.0.0.1` and has no
-  authentication or rate limiting. It holds two API keys, so do not serve it.
-- **Result size.** Queries are capped at 1,000 rows and 30 seconds; a
-  truncated result is flagged, not paginated.
-
-### Fixed in iteration 2
-
-The baseline's four recorded defects, each with the evidence:
-
-| Defect in iteration 1 | Now |
-|---|---|
-| A 20-row result described as 19 rows; `customer_unique_id` called "distinct customer IDs" | Row count and column names are stated as facts; the answer call gets the schema. Question 17 grades the count |
-| `asdfgh` answered via `SELECT 'looks like random keystrokes' AS message` | Declined before any SQL exists |
-| "What will sales be next month?" answered with a trailing average | Declined; no SQL generated |
-| "What are the best products?" silently picked revenue | Asks which reading: revenue, units sold, or review score |
+It will decline anything the data does not hold — costs, margins, customer
+demographics, stock, or the future — and ask back when a word like "best" has
+no agreed meaning. Review text is Portuguese and is not read at all.
 
 ## Tests
 
@@ -197,5 +95,37 @@ Offline tests mock the model and run on tiny fixture CSVs. Integration tests
 make real calls and assert analytical meaning rather than SQL strings, since
 two correct queries for one question rarely look alike.
 
-Working notes, including what broke and why, are in `docs/dev_notes.md`. The
-measured grain, keys and traps of the dataset are in `docs/data_model.md`.
+## Evaluation
+
+A fixed question set, written before the first run, graded on classification
+and on value:
+
+```bash
+uv run --env-file .env python -m twyd.eval      # 21 questions, ~$0.20
+```
+
+**21/21 on the recorded iteration 3 run** (classification 21/21, values
+11/11), including the traps that make this dataset interesting: customers
+counted as people rather than order rows, reviews aggregated per order before
+averaging, orders with no reviews found by anti-join, and lateness defined by
+timestamp rather than status.
+
+Read question 8 before believing the 21 — it passed that run and failed the
+one before it with nothing changed between them, which is why every run is
+recorded in full rather than reduced to a score.
+
+## Documentation
+
+| Document | What's in it |
+|---|---|
+| [`docs/architecture.md`](docs/architecture.md) | The pipeline stage by stage, the module contracts, the two independent safety layers, and the model settings |
+| [`docs/limitations.md`](docs/limitations.md) | What it gets wrong and why, each tied to a recorded run |
+| [`docs/data_model.md`](docs/data_model.md) | The measured grain, keys, null rates and semantic traps of the nine tables |
+| [`docs/eval_questions.md`](docs/eval_questions.md) | The question set and the grading rules |
+| [`docs/eval_results.md`](docs/eval_results.md) | The latest run, every generated query included (overwritten each run) |
+| `docs/eval_results_iteration{1,2,3}.md` | The frozen per-iteration runs |
+| [`docs/implementation_plan.md`](docs/implementation_plan.md) | The milestones, and what was deliberately not built |
+| [`docs/dev_notes.md`](docs/dev_notes.md) | Working notes: what broke, why, and what changed |
+
+**Single user, localhost.** No authentication or rate limiting, and it holds
+two API keys. Do not serve it.
