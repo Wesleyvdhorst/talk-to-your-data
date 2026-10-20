@@ -80,7 +80,10 @@ Delete `db/` and redo step 3 at any time; nothing else depends on it.
 
 ## What to ask it
 
-The examples in the app have all been run through the pipeline at least once.
+The examples in the app have all been run through the pipeline at least once,
+on both classifiers. They are grouped by the path they exercise — one number,
+bigger questions, asks back, declines, follow-ups and edge cases — so each
+behaviour can be tried with one click.
 Questions that work well are concrete and single-purpose:
 
 - *How many customers does the company have?* (96,096 people, not 99,441 order rows)
