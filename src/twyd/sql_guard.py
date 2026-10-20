@@ -45,8 +45,18 @@ def validate(sql: str, allowed_tables: frozenset[str] | None = None) -> str:
     if not sql or not sql.strip():
         raise UnsafeSQL("empty SQL")
 
+    # A private in-memory connection rather than duckdb's module-level default:
+    # that one is shared by every thread, Streamlit runs each session in its
+    # own, and a DuckDB connection is not thread-safe. Only parses, never reads.
+    with duckdb.connect() as parser:
+        return _validate(parser, sql, allowed_tables or ALLOWED_TABLES)
+
+
+def _validate(
+    parser: duckdb.DuckDBPyConnection, sql: str, allowed_tables: frozenset[str]
+) -> str:
     try:
-        statements = duckdb.extract_statements(sql)
+        statements = parser.extract_statements(sql)
     except duckdb.Error as exc:
         raise UnsafeSQL(f"SQL does not parse: {exc}") from exc
 
@@ -64,19 +74,21 @@ def validate(sql: str, allowed_tables: frozenset[str] | None = None) -> str:
             f"only SELECT/WITH queries are allowed, this is a {kind.name} statement"
         )
 
-    _check_references(statements[0].query, allowed_tables or ALLOWED_TABLES)
+    _check_references(parser, statements[0].query, allowed_tables)
     return sql
 
 
-def _check_references(sql: str, allowed_tables: frozenset[str]) -> None:
+def _check_references(
+    parser: duckdb.DuckDBPyConnection, sql: str, allowed_tables: frozenset[str]
+) -> None:
     """Reject anything the query reads that is not a known table.
 
-    Serialising uses DuckDB's default in-memory connection: the SQL is parsed,
-    never executed, so no data or file is touched here.
+    `parser` is an empty in-memory connection: the SQL is serialised, never
+    executed, so no data or file is touched here.
     """
     try:
         tree = json.loads(
-            duckdb.execute("SELECT json_serialize_sql(?)", [sql]).fetchone()[0]
+            parser.execute("SELECT json_serialize_sql(?)", [sql]).fetchone()[0]
         )
     except duckdb.Error as exc:
         raise UnsafeSQL(f"SQL could not be parsed for inspection: {exc}") from exc
