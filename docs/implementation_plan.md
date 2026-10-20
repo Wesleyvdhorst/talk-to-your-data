@@ -16,7 +16,8 @@ The assignment at `docs/requirements.txt` is authoritative. Work on **one milest
   inspectable trace (8), and a graded eval covering all of it (9). Iteration 3
   closed with the borderline classification (10), the modelling assumption
   behind a number (11) and follow-up questions (12).
-- **Latest run: 21/21** (`docs/eval_results.md`). Classification 21/21,
+- **Latest run: 21/21** (archived in `docs/eval_results_iteration3.md`; the
+  live file is `docs/eval_results.md`). Classification 21/21,
   values 11/11 — but question 8 passed this run and failed the previous one
   with nothing changed between them, which is the limitation itself rather
   than a fix. Read it before quoting the score. The iteration 2 baseline is archived in
