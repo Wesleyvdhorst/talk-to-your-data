@@ -411,6 +411,15 @@ def test_an_answered_turn_becomes_the_turn_the_next_question_sees(conn, jev):
     )
 
 
+def test_rejected_sql_is_not_handed_to_the_next_turn(conn, jev):
+    """History calls it "Answered with SQL"; a follow-up must not build on it."""
+    client = ScriptedClient("DROP TABLE orders")
+    result = answer_question("drop it", conn, client=client, jev=jev)
+
+    assert result.sql == "DROP TABLE orders"  # still inspectable on the answer
+    assert result.turn.sql is None
+
+
 def test_a_clarification_becomes_a_turn_that_records_what_was_asked(conn):
     """The clarification flow and the follow-up flow are one mechanism: the
     answer to a clarification is just the next turn."""

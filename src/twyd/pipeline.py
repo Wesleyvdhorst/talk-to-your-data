@@ -1,7 +1,8 @@
 """question -> classification -> SQL -> validation -> execution -> answer.
 
-Linear and deterministic. No repair attempt and no routing: those are later
-work, and adding them here is a change to this file rather than to llm.py.
+Linear and deterministic. No repair attempt and no routing: both were
+dropped on evidence (docs/implementation_plan.md), and adding either would be
+a change to this file rather than to llm.py.
 
 Classification comes first and can end the turn. The alternative - generate
 SQL and hope the model declines inside it - is what the baseline did, and it
@@ -177,11 +178,13 @@ class Answer:
 
         Derived, like `trace`, from the fields already set, so the caller
         appends what happened rather than reconstructing it - and so it cannot
-        record SQL that was never generated or a question never asked.
+        record SQL that was never generated or a question never asked. SQL
+        that was rejected or failed is left out: history_block presents it as
+        "Answered with SQL", and a follow-up would build on a broken query.
         """
         return Turn(
             question=self.question,
-            sql=self.sql,
+            sql=self.sql if self.ok else None,
             asked=self.message if self.stage == "clarify" else None,
         )
 
