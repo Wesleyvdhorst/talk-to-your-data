@@ -14,7 +14,7 @@ best products?") gets a clarifying question instead of a silent choice.
 ## Running it
 
 **You need:** Python 3.14 via [`uv`](https://docs.astral.sh/uv/), an Anthropic
-API key, and the Olist CSVs. Costs under a cent per question (measured:
+API key, and the Olist CSVs. A TypeSafe key for the classifier is optional. Costs under a cent per question (measured:
 $0.007 for a typical answer with the prompt cache warm, $0.012 cold).
 
 **1. Install.**
@@ -44,14 +44,19 @@ table. Safe to re-run: it replaces every table.
 uv run python -m twyd.ingest     # -> db/olist.duckdb
 ```
 
-**4. Add your API keys.** Copy `.env.example` to `.env` and fill in both:
+**4. Add your API keys.** Copy `.env.example` to `.env` and fill it in:
 
 ```bash
 cp .env.example .env
 ```
 
-`ANTHROPIC_API_KEY` writes the SQL and the answer; `TYPESAFE_API_KEY` runs the
-classifier. Keys are read from the environment and never committed.
+`ANTHROPIC_API_KEY` is required: it writes the SQL and the answer.
+`TYPESAFE_API_KEY` is optional. With it, Jev (a zero-shot decision model)
+decides whether a question is answerable, ambiguous or unsupported; leave it
+empty and Claude makes that decision from the same criteria. Both pass the
+full eval (21/21); without Jev each question costs about $0.0005 more and the
+trace shows the model instead of a confidence. Keys are read from the
+environment and never committed.
 
 **5. Run.**
 
@@ -75,7 +80,10 @@ Delete `db/` and redo step 3 at any time; nothing else depends on it.
 
 ## What to ask it
 
-The examples in the app have all been run through the pipeline at least once.
+The examples in the app have all been run through the pipeline at least once,
+on both classifiers. They are grouped by the path they exercise — one number,
+bigger questions, asks back, declines, follow-ups and edge cases — so each
+behaviour can be tried with one click.
 Questions that work well are concrete and single-purpose:
 
 - *How many customers does the company have?* (96,096 people, not 99,441 order rows)
@@ -90,13 +98,15 @@ no agreed meaning. Review text is Portuguese and is not read at all.
 ## Tests
 
 ```bash
-uv run pytest                                   # 199 offline, no key needed
-uv run --env-file .env pytest -m integration    # 40 real-model tests, ~$0.35
+uv run pytest                                   # 231 offline, no key needed
+uv run --env-file .env pytest -m integration    # 58 real-model tests, ~$0.40
 ```
 
 Offline tests mock the model and run on tiny fixture CSVs. Integration tests
 make real calls and assert analytical meaning rather than SQL strings, since
-two correct queries for one question rarely look alike.
+two correct queries for one question rarely look alike. The classifier's
+boundary tests run once per classifier — Jev, and Claude as the fallback —
+skipping whichever has no key.
 
 ## Evaluation
 
@@ -104,18 +114,19 @@ A fixed question set, written before the first run, graded on classification
 and on value:
 
 ```bash
-uv run --env-file .env python -m twyd.eval      # 21 questions, ~$0.20
+uv run --env-file .env python -m twyd.eval      # 21 questions, ~$0.12
 ```
 
-**21/21 on the recorded iteration 3 run** (classification 21/21, values
-11/11), including the traps that make this dataset interesting: customers
+**21/21 with either classifier** (classification 21/21, values 11/11 —
+`eval_results.md` with Jev, `eval_results_claude_classifier.md` with Claude),
+including the traps that make this dataset interesting: customers
 counted as people rather than order rows, reviews aggregated per order before
 averaging, orders with no reviews found by anti-join, and lateness defined by
 timestamp rather than status.
 
-Read question 8 before believing the 21 — it passed that run and failed the
-one before it with nothing changed between them, which is why every run is
-recorded in full rather than reduced to a score.
+Read question 8 before believing the 21 — it passes in both of these runs,
+and has failed an earlier one with nothing changed in between, which is why
+every run is recorded in full rather than reduced to a score.
 
 ## Documentation
 
@@ -127,8 +138,9 @@ recorded in full rather than reduced to a score.
 | [`docs/eval_questions.md`](docs/eval_questions.md) | The question set and the grading rules |
 | [`docs/eval_results.md`](docs/eval_results.md) | The latest run, every generated query included (overwritten each run) |
 | `docs/eval_results_iteration{1,2,3}.md` | The frozen per-iteration runs |
+| [`docs/eval_results_claude_classifier.md`](docs/eval_results_claude_classifier.md) | The same set with Claude classifying (no TypeSafe key) |
 | [`docs/implementation_plan.md`](docs/implementation_plan.md) | The milestones, and what was deliberately not built |
 | [`docs/dev_notes.md`](docs/dev_notes.md) | Working notes: what broke, why, and what changed |
 
 **Single user, localhost.** No authentication or rate limiting, and it holds
-two API keys. Do not serve it.
+one or two API keys. Do not serve it.

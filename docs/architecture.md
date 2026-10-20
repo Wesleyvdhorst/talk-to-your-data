@@ -10,7 +10,7 @@ running it, see the README; for what it gets wrong, see `limitations.md`.
 ```
 question (+ up to 3 earlier turns, capped at 2,000 characters)
   -> column overview     one line per table: its columns, ~266 tokens
-  -> classify            Jev, three labels, over those columns and the history
+  -> classify            Jev (or Claude, with no TypeSafe key), three labels, over those columns and the history
   -> clarify             if AMBIGUOUS: LLM call asking which reading, turn ends
                          if UNSUPPORTED: fixed scope message, turn ends
   -> schema context      built from the live database + verified semantic notes
@@ -46,8 +46,8 @@ oldest dropped, never summarised.
 | `db.py` | read-only connections, execution, row cap, timeout |
 | `schema.py` | the prompt's schema context: columns introspected, semantics hand-written |
 | `sql_guard.py` | treats generated SQL as untrusted; allowlist over the parse tree |
-| `classify.py` | ANSWERABLE / AMBIGUOUS / UNSUPPORTED from the column list, before any SQL exists |
-| `llm.py` | both Claude calls; the only file that knows that provider |
+| `classify.py` | ANSWERABLE / AMBIGUOUS / UNSUPPORTED from the column list, before any SQL exists; Jev if a TypeSafe key is set, else Claude |
+| `llm.py` | the SQL, answer and clarification calls, and the Claude model every call uses |
 | `pipeline.py` | wires the above; returns failures as fields, never as empty results |
 | `app.py` | thin Streamlit layer; contains no logic |
 | `eval.py` | the fixed evaluation set and its runner |
@@ -69,3 +69,9 @@ thinking, structured output for the SQL. About **$0.01 per question**.
 This model rejects `temperature`, forced `tool_choice` and assistant prefill
 with a 400 — all three being the usual ways to pin down text-to-SQL output —
 so the output schema does that work instead.
+
+Without a TypeSafe key the classification is a Claude call as well: the same
+model, effort `low`, the three labels as a structured-output enum, and the
+criteria in a cached system prompt — about $0.0005 a question. With the key,
+Jev (`jev-latest`, recorded per call as the concrete version) classifies and
+Claude is not asked.

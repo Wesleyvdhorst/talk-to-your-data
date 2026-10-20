@@ -1,9 +1,11 @@
-"""Real Jev calls. Run on purpose: uv run --env-file .env pytest -m integration
+"""Real classifier calls. Run on purpose: uv run --env-file .env pytest -m integration
 
-About $0.0001 each - input is $0.042/MTok and output is free - so this file is
-cheap enough to cover every label. It checks the labels the pipeline's
-behaviour depends on, not the confidence values, which are the model's to
-decide and are only recorded.
+Every boundary runs on both classifiers: Jev (about $0.0001 a call - input is
+$0.042/MTok and output is free) and the Claude fallback the app uses without a
+TypeSafe key (about $0.003 cold). The same questions pin both, because the
+criteria are shared and a boundary one classifier holds is not evidence that
+the other does. It checks the labels the pipeline's behaviour depends on, not
+Jev's confidence values, which are the model's to decide and are only recorded.
 """
 
 import os
@@ -15,13 +17,19 @@ from twyd.classify import AMBIGUOUS, ANSWERABLE, UNSUPPORTED, classify
 from twyd.db import connect
 from twyd.schema import column_overview
 
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(
-        not os.environ.get("TYPESAFE_API_KEY"),
-        reason="needs TYPESAFE_API_KEY (uv run --env-file .env pytest -m integration)",
-    ),
-]
+pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(params=["jev", "claude"])
+def classifier(request, monkeypatch):
+    """Which classifier answers. Claude is chosen the way the app chooses it:
+    by there being no TypeSafe key."""
+    key = {"jev": "TYPESAFE_API_KEY", "claude": "ANTHROPIC_API_KEY"}[request.param]
+    if not os.environ.get(key):
+        pytest.skip(f"needs {key} (uv run --env-file .env pytest -m integration)")
+    if request.param == "claude":
+        monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    return request.param
 
 
 @pytest.fixture(scope="module")
@@ -53,7 +61,7 @@ def columns():
         "What is the average delivery time in days?",
     ],
 )
-def test_the_questions_the_baseline_answers_stay_answerable(question, columns):
+def test_the_questions_the_baseline_answers_stay_answerable(question, columns, classifier):
     assert classify(question, columns).label == ANSWERABLE
 
 
@@ -67,7 +75,7 @@ def test_the_questions_the_baseline_answers_stay_answerable(question, columns):
         "hello there",  # not a question about data
     ],
 )
-def test_what_this_data_cannot_answer_is_declined(question, columns):
+def test_what_this_data_cannot_answer_is_declined(question, columns, classifier):
     assert classify(question, columns).label == UNSUPPORTED
 
 
@@ -84,7 +92,7 @@ def test_what_this_data_cannot_answer_is_declined(question, columns):
         "How is business lately?",
     ],
 )
-def test_an_undefined_metric_or_period_is_ambiguous(question, columns):
+def test_an_undefined_metric_or_period_is_ambiguous(question, columns, classifier):
     assert classify(question, columns).label == AMBIGUOUS
 
 
@@ -99,10 +107,11 @@ def test_an_undefined_metric_or_period_is_ambiguous(question, columns):
         "How will we be doing next quarter?",
     ],
 )
-def test_vague_wording_does_not_make_a_missing_column_ambiguous(question, columns):
+def test_vague_wording_does_not_make_a_missing_column_ambiguous(question, columns, classifier):
     assert classify(question, columns).label == UNSUPPORTED
 
 
+@pytest.mark.skipif(not os.environ.get("TYPESAFE_API_KEY"), reason="needs TYPESAFE_API_KEY")
 def test_the_concrete_model_version_is_recorded(columns):
     """`jev-latest` is an alias - the models endpoint publishes no pinned id -
     so the version that answered is recorded rather than requested."""

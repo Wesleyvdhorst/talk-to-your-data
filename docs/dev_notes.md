@@ -826,3 +826,25 @@ questions with bounded history (12). Review text and the agent loop are out.*
   mark, axis type, sort — which made a real end-to-end check cheap (~$0.02)
   and repeatable without a browser. It reads the spec, not the pixels, so a
   look in the browser is still the last check.
+
+## Jev made optional — Claude classifies without a TypeSafe key
+
+- **Attempted.** Let the app run on one key: with no `TYPESAFE_API_KEY`,
+  `classify()` sends the same instructions and criteria to Claude (the model
+  in `llm.py`, effort low, a three-label enum as structured output). Jev stays
+  the default when its key is present, because it expresses doubt as
+  confidence instead of picking AMBIGUOUS as a label.
+- **Decisions.** The call lives in `classify.py` next to the criteria (my
+  choice; Claude suggested `llm.py`), the backend is chosen by whether the key
+  exists rather than by a new setting, and the model follows the Anthropic key
+  rather than being named separately, which also keeps the cost meter's price
+  table right.
+- **What failed.** Parametrising the boundary tests over both backends found
+  one disagreement immediately: Claude called "How many customers does the
+  company have?" AMBIGUOUS on 4 of 4 runs, reading `customer_id` and
+  `customer_unique_id` as two meanings. Fixed in the shared AMBIGUOUS clause
+  (two keys for one thing are not ambiguous), not in a Claude-only patch and
+  not by touching the test. Then 37/37 on both, and 21/21 on the eval.
+- **Learned.** A pytest fixture with `params=["jev", "claude"]` turns one
+  boundary suite into a comparison of two classifiers, and skips whichever
+  has no key.
