@@ -15,14 +15,24 @@ Sonnet classify call would cost - but the money is not the argument at this
 volume. The argument is that `AMBIGUOUS` is better expressed as low
 confidence in a label than as a label a chat model chooses to apply to itself.
 
-This module knows nothing about SQL, prompts or DuckDB. If Jev disappoints,
-`classify()` is the only thing that has to change.
+Jev is optional. Without a TYPESAFE_API_KEY the same instructions and
+criteria go to Claude instead, so the app runs on one key. That path is the
+fallback and not the default, for the reason above: Claude picks AMBIGUOUS as
+a label rather than expressing it as doubt, and it returns no confidence.
+
+This module knows nothing about SQL or DuckDB. If either classifier
+disappoints, `classify()` is the only thing that has to change.
 """
 
+import json
+import os
 from dataclasses import dataclass
 from typing import Any
 
+import anthropic
 from typesafe_sdk import Choice, TypeSafeClient
+
+from twyd.llm import MODEL as CLAUDE_MODEL, _cached, _text
 
 # jev-latest is an alias, not a version: the models endpoint publishes only
 # `jev-latest` and `jev-preview`, so there is no concrete id to pin. The
@@ -68,8 +78,10 @@ _CRITERIA = {
         "open ('how are we doing recently?') belongs here as well, and not "
         "under unsupported: these tables can answer it once the metric and "
         "the period are chosen, so asking which was meant is more use than "
-        "declining. Or an entity that could mean more than one thing in this "
-        "data. A follow-up whose missing piece the earlier turns do NOT supply "
+        "declining. Or an entity that could mean two different things a "
+        "reader might want. Two columns that identify the same thing are not "
+        "that: 'customers' are people, and which key counts them is a detail "
+        "the query settles, not a choice to ask the user about. A follow-up whose missing piece the earlier turns do NOT supply "
         "belongs here as well: 'and for late deliveries?' with nothing before "
         "it names no measure at all. This label is only ever for a choice the "
         "DATA could make. A "
@@ -113,15 +125,39 @@ TABLES AND COLUMNS
 {columns}"""
 
 
+def _instructions(columns: str) -> str:
+    return _INSTRUCTIONS.format(
+        columns=_COLUMNS_BLOCK.format(columns=columns) if columns else ""
+    )
+
+
 def _question(columns: str) -> dict[str, Choice]:
-    return {
-        "label": Choice(
-            instructions=_INSTRUCTIONS.format(
-                columns=_COLUMNS_BLOCK.format(columns=columns) if columns else ""
-            ),
-            criteria=_CRITERIA,
-        )
-    }
+    return {"label": Choice(instructions=_instructions(columns), criteria=_CRITERIA)}
+
+
+# The Claude fallback. Effort low: picking one of three labels is the kind of
+# task the claude-api guidance says holds at low. Thinking stays adaptive, so
+# max_tokens has room for it rather than the ~256 a bare label would need. The
+# enum is what makes the label a guarantee: anything else is a 400, not a
+# string to parse.
+CLAUDE_EFFORT = "low"
+CLAUDE_MAX_TOKENS = 1024
+_LABEL_FORMAT = {
+    "type": "json_schema",
+    "schema": {
+        "type": "object",
+        "properties": {"label": {"type": "string", "enum": list(_CRITERIA)}},
+        "required": ["label"],
+        "additionalProperties": False,
+    },
+}
+
+
+def _claude_system(columns: str) -> str:
+    """The Jev instructions with the criteria written out, since Claude has no
+    criteria field. Same text, so both classifiers judge the same boundaries."""
+    criteria = "\n\n".join(f"{label}: {text}" for label, text in _CRITERIA.items())
+    return f"{_instructions(columns)}\n\nLABELS\n{criteria}\n\nAnswer with one label."
 
 
 @dataclass(frozen=True)
@@ -130,8 +166,10 @@ class Classification:
 
     `confidence` and `probabilities` are recorded but not acted on. Thresholding
     them is a tuned knob, and nothing measured yet justifies one; `model` is
-    which concrete Jev version answered. All three are None when a
-    deterministic check decided and no call was made - `reason` says which.
+    which concrete model answered. All three are None when a deterministic
+    check decided and no call was made - `reason` says which. When Claude
+    classified, `model` is set and the other two are None: it gives no
+    calibrated confidence, and inventing one would be worse than none.
     """
 
     label: str
@@ -146,7 +184,11 @@ class Classification:
 
 
 def classify(
-    question: str, columns: str = "", client: Any | None = None, history: str = ""
+    question: str,
+    columns: str = "",
+    client: Any | None = None,
+    history: str = "",
+    claude: Any | None = None,
 ) -> Classification:
     """Label a question. Spends nothing on input that code can already judge.
 
@@ -160,6 +202,10 @@ def classify(
     about conversations - it classifies whatever state it is handed. It is
     needed because "and in 2018?" is not a question on its own: without the
     previous turn the only honest label for it is AMBIGUOUS.
+
+    `client` is a Jev client and `claude` an Anthropic one. Jev classifies when
+    a client is passed or TYPESAFE_API_KEY is set; otherwise Claude does. The
+    pipeline passes its metered Claude client so this call is counted.
 
     Errors from the API propagate: a missing key or an unreachable service is
     a problem with the app, not an UNSUPPORTED question, and silently
@@ -175,10 +221,22 @@ def classify(
             reason=f"the question is longer than {MAX_QUESTION_CHARS} characters",
         )
 
-    questions = _question(columns)
     # The current question goes last and is labelled, so the model is never in
     # doubt about which one it is judging.
     state = f"{history}\n\nCURRENT QUESTION: {question}" if history else question
+    if client is None and not os.environ.get("TYPESAFE_API_KEY"):
+        response = (claude or anthropic.Anthropic()).messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=CLAUDE_MAX_TOKENS,
+            output_config={"effort": CLAUDE_EFFORT, "format": _LABEL_FORMAT},
+            system=_cached(_claude_system(columns)),
+            messages=[{"role": "user", "content": state}],
+        )
+        return Classification(
+            label=json.loads(_text(response))["label"], model=CLAUDE_MODEL
+        )
+
+    questions = _question(columns)
     if client is None:
         with TypeSafeClient(model=MODEL) as owned:
             response = owned.system_one(state=state, questions=questions)

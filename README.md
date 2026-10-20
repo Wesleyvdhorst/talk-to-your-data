@@ -14,7 +14,7 @@ best products?") gets a clarifying question instead of a silent choice.
 ## Running it
 
 **You need:** Python 3.14 via [`uv`](https://docs.astral.sh/uv/), an Anthropic
-API key, and the Olist CSVs. Costs under a cent per question (measured:
+API key, and the Olist CSVs. A TypeSafe key for the classifier is optional. Costs under a cent per question (measured:
 $0.007 for a typical answer with the prompt cache warm, $0.012 cold).
 
 **1. Install.**
@@ -44,14 +44,19 @@ table. Safe to re-run: it replaces every table.
 uv run python -m twyd.ingest     # -> db/olist.duckdb
 ```
 
-**4. Add your API keys.** Copy `.env.example` to `.env` and fill in both:
+**4. Add your API keys.** Copy `.env.example` to `.env` and fill it in:
 
 ```bash
 cp .env.example .env
 ```
 
-`ANTHROPIC_API_KEY` writes the SQL and the answer; `TYPESAFE_API_KEY` runs the
-classifier. Keys are read from the environment and never committed.
+`ANTHROPIC_API_KEY` is required: it writes the SQL and the answer.
+`TYPESAFE_API_KEY` is optional. With it, Jev (a zero-shot decision model)
+decides whether a question is answerable, ambiguous or unsupported; leave it
+empty and Claude makes that decision from the same criteria. Both pass the
+full eval (21/21); without Jev each question costs about $0.0005 more and the
+trace shows the model instead of a confidence. Keys are read from the
+environment and never committed.
 
 **5. Run.**
 
@@ -131,4 +136,4 @@ recorded in full rather than reduced to a score.
 | [`docs/dev_notes.md`](docs/dev_notes.md) | Working notes: what broke, why, and what changed |
 
 **Single user, localhost.** No authentication or rate limiting, and it holds
-two API keys. Do not serve it.
+one or two API keys. Do not serve it.

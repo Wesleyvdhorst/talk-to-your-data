@@ -319,6 +319,13 @@ def as_markdown(results: list[Result]) -> str:
     labels_ok = sum(r.label_ok for r in results)
     values = [r for r in results if r.question.reference]
     values_ok = sum(_close(r.actual, r.expected) for r in values if r.answer.ok)
+    # Jev or Claude, depending on whether a TypeSafe key was set: two runs
+    # with different classifiers are different measurements.
+    classifiers = sorted({
+        r.answer.classification.model
+        for r in results
+        if r.answer.classification and r.answer.classification.model
+    })
     lines = [
         f"**{passed}/{len(results)} questions correct.** "
         f"Classification {labels_ok}/{len(results)}; "
@@ -328,7 +335,8 @@ def as_markdown(results: list[Result]) -> str:
         # reads are the number that says whether prompt caching is working.
         f"Claude cost ${sum(r.answer.cost_usd for r in results):.4f}, "
         f"{sum(u.cache_read for r in results for u in r.answer.usage):,} "
-        f"input tokens read from cache.",
+        f"input tokens read from cache. "
+        f"Classified by {', '.join(classifiers) or 'no model'}.",
         "",
         "| # | Question | Covers | Verdict | Label | Expected | Got | Ended at | Cost | Why not |",
         "|---|---|---|---|---|---|---|---|---|---|",
@@ -389,7 +397,8 @@ def main() -> None:
         "`eval_results_iteration3.md`, `eval_results_iteration2.md` and "
         "`eval_results_iteration1.md`; the cost before and after prompt "
         "caching in `eval_results_m13_uncached.md` and "
-        "`eval_results_m13_cached.md`.\n\n"
+        "`eval_results_m13_cached.md`; the run with Claude as the classifier "
+        "(no TypeSafe key) in `eval_results_claude_classifier.md`.\n\n"
         + as_markdown(results)
         + "\n"
     )

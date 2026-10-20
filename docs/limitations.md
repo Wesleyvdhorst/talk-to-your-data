@@ -43,6 +43,13 @@ and whatever ran last in `eval_results.md`.
   quarter?" across with it, so the criteria carry an explicit carve-out for
   forecasts. The boundary holds because two integration tests pin both sides
   of it, not because the wording is self-evident.
+- **Without a TypeSafe key, the classifier has no confidence at all.** Claude
+  then classifies from the same criteria and passes the same 21 questions
+  and 37 boundary tests (`eval_results_claude_classifier.md`), but it picks
+  AMBIGUOUS as a label rather than expressing it as doubt, and returns no
+  probability to record. Getting it there took one sharpened clause: Claude
+  read `customer_id` and `customer_unique_id` as two meanings of "customers"
+  and asked back on every run, where Jev did not.
 - **The classifier's confidence is recorded, never acted on.** Thresholding it
   is tempting and would be wrong: "how many orders were placed in 2030?" — the
   question whose correct answer is zero — sits at 0.40–0.55, below several
@@ -73,11 +80,12 @@ and whatever ran last in `eval_results.md`.
 - **The cost figure is list price, and Claude only.** `Answer.cost_usd` prices
   `response.usage` at Sonnet 5.5's list prices, hard-coded in
   `pipeline.PRICE_PER_MTOK`; nothing checks they still agree with the model
-  in `llm.py` or with the price list. Jev's classifier calls are not counted.
+  in `llm.py` or with the price list. Jev's classifier calls are not counted;
+  Claude's are, when it is the classifier.
   The answer call is not cached (its schema follows the result rows), so it
   is now most of what a question costs.
 - **Single user, localhost.** The app binds to `127.0.0.1` and has no
-  authentication or rate limiting. It holds two API keys, so do not serve it.
+  authentication or rate limiting. It holds one or two API keys, so do not serve it.
 - **Result size.** Queries are capped at 1,000 rows and 30 seconds; a
   truncated result is flagged, not paginated.
 

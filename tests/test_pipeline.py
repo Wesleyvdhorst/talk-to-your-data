@@ -10,6 +10,7 @@ import json
 import pytest
 
 from conftest import StubJev  # pytest puts tests/ on sys.path; it is not a package
+from twyd.llm import MODEL
 from twyd.pipeline import (
     MAX_HISTORY_CHARS,
     Answer,
@@ -467,3 +468,43 @@ def test_a_rejected_query_still_reports_what_generating_it_cost(conn, jev):
                              client=ScriptedClient("DROP TABLE orders"), jev=jev)
     assert result.stage == "validate"
     assert len(result.usage) == 1
+
+
+# With no TypeSafe key the classification is a Claude call, and it goes
+# through the same metered client as the rest, so its cost is not invisible.
+
+
+class ClaudeClassifiedClient:
+    """Classifies as `label` first, then replies as ScriptedClient does."""
+
+    def __init__(self, label: str, sql: str = "SELECT count(*) AS n FROM orders"):
+        self.messages = _Messages([
+            json.dumps({"label": label}),
+            json.dumps({"sql": sql, "assumption": ""}),
+            "An answer.",
+        ])
+
+    @property
+    def call_count(self):
+        return len(self.messages.calls)
+
+
+def test_without_jev_the_classification_is_a_metered_claude_call(conn, monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    client = ClaudeClassifiedClient("ANSWERABLE")
+    result = answer_question("how many orders are there?", conn, client=client)
+
+    assert result.ok and result.answer == "An answer."
+    assert client.call_count == 3  # classify, SQL, answer
+    assert len(result.usage) == 3
+    assert ("classify", f"ANSWERABLE - {MODEL}") in result.trace
+
+
+def test_a_question_claude_declines_still_reports_what_the_decline_cost(conn, monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    client = ClaudeClassifiedClient("UNSUPPORTED")
+    result = answer_question("what will sales be next month?", conn, client=client)
+
+    assert result.declined and result.sql is None
+    assert client.call_count == 1  # the classification, and nothing after it
+    assert result.cost_usd > 0

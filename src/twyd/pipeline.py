@@ -108,7 +108,8 @@ class _Metered:
     One per question, so the record is that question's and nothing else's.
     llm.py never knows it is there: it calls messages.create exactly as before,
     which is why no function in it had to change its return type to report
-    tokens. Jev's calls are not counted - at $0.042/MTok they are noise.
+    tokens. Jev's calls are not counted - at $0.042/MTok they are noise - but
+    when Claude classifies (no TypeSafe key), that call goes through here too.
     """
 
     def __init__(self, client: Any):
@@ -223,6 +224,8 @@ class Answer:
                 detail += f" - {c.reason} (no model call)"
             elif c.confidence is not None:
                 detail += f" - confidence {c.confidence:.2f}, {c.model}"
+            elif c.model:
+                detail += f" - {c.model}"
             steps.append(("classify", detail))
         if self.stage == "clarify":
             steps.append(("clarify", "asked which reading was meant"))
@@ -262,7 +265,8 @@ def answer_question(
     """Answer one question, or decline it. Returns failures as fields.
 
     `client` is the Claude client and `jev` the classifier's; both are optional
-    so tests can stub either independently.
+    so tests can stub either independently. With no `jev` and no
+    TYPESAFE_API_KEY, Claude classifies through `client`.
 
     `history` is the earlier turns of this conversation, newest last, and is
     bounded by history_block() rather than by the caller. It informs
@@ -280,7 +284,14 @@ def answer_question(
         return Answer(question=question, error="the question is empty", stage="generate")
 
     past = history_block(history)
-    classification = classify(question, column_overview(conn), client=jev, history=past)
+    # Every Claude call from here on goes through this one and is counted -
+    # including the classification, when Claude is the classifier. Building
+    # the client makes no request, so a question Jev declines still costs
+    # nothing.
+    client = _Metered(client or anthropic.Anthropic())
+    classification = classify(
+        question, column_overview(conn), client=jev, history=past, claude=client
+    )
     if classification.label == UNSUPPORTED:
         # Fixed text: the scope of the data is a fact about the data, so
         # nothing here needs a model.
@@ -289,12 +300,10 @@ def answer_question(
             classification=classification,
             message=_UNSUPPORTED_MESSAGE,
             stage="classify",
+            usage=tuple(client.calls),
         )
 
     context = schema_context(conn)
-    # Only now: an UNSUPPORTED question never reaches Claude, so it needs no
-    # client. Every Claude call below goes through this one and is counted.
-    client = _Metered(client or anthropic.Anthropic())
 
     if classification.label == AMBIGUOUS:
         # The classifier decided *that* the question is underspecified; this

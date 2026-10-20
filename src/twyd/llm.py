@@ -1,8 +1,10 @@
-"""The two LLM calls, and the only file that knows the model provider.
+"""The Claude calls, and the model they all use.
 
 Call #1 turns a question plus schema context into SQL. Call #2 turns a
 question, its SQL and the result into prose. Neither executes SQL, validates
-it, or opens a database: the pipeline does that between them.
+it, or opens a database: the pipeline does that between them. The one other
+Claude call - classifying, when there is no TypeSafe key - lives in
+classify.py next to the criteria it sends, and reuses MODEL from here.
 
 Settings are module constants rather than parameters, because every one of
 them is a decision worth defending rather than a knob to twiddle:
