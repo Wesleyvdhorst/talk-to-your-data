@@ -764,3 +764,36 @@ questions with bounded history (12). Review text and the agent loop are out.*
   a reference value would grade which column the model chose to return rather
   than whether the follow-up worked) were written before any of them had ever
   run.
+
+## Milestone 13 — what a question costs, and the cache that was never on
+
+- **Attempted.** Put a price on every question: tokens per Claude call, $ per
+  answer, a cost column in the eval. It turned into an audit of a design claim.
+- **What it found.** The history placement in milestone 12 was argued partly
+  "for caching" — history in the user message cannot invalidate the cached
+  schema. But no request ever set `cache_control`, and the API caches nothing
+  unasked. The first metered run: 21/21, $0.181, **0 tokens read from cache**.
+  The reasoning was right and the feature it reasoned about was off.
+- **Where AI helped.** Claude spotted the missing `cache_control` while reading
+  `llm.py` during planning, and proposed measuring before fixing so the gap
+  would be a recorded number rather than an assertion.
+- **Decision: wrap the client, don't change `llm.py`.** `pipeline._Metered`
+  sits between the pipeline and the Claude client and records
+  `response.usage` per call. The alternative — every `llm.py` function
+  returning its usage — would have changed three return types and their
+  tests to carry a fact those functions do not care about.
+- **The fix was one breakpoint.** A 5-minute `cache_control` closing the SQL
+  and clarify system prompts. Same 21 questions, nothing else changed: 21/21,
+  $0.115 (-36%), 38,073 tokens from cache, only the first question writes.
+  Both runs archived (`eval_results_m13_*.md`).
+- **What nearly went wrong.** Changing `system` from a string to a block list
+  made the history-placement test pass vacuously: `"x" not in [ {...} ]` is
+  always true. Caught on review and pointed at the block text — a test can be
+  weakened by a change to the thing it inspects, not only by editing it.
+- **Open.** The answer call is now most of the cost (~2,450 uncached tokens
+  per answer) because its schema follows the result rows. Moving it is a
+  prompt change that could move answers, so it waits.
+- **Learned.** Prompt caching is opt-in and silent when absent; `usage`
+  (`cache_read_input_tokens`) is the only place it shows. And the minimum
+  cacheable prefix on Sonnet 5.5 is 512 tokens, so a ~2,600-token schema
+  prompt qualifies easily.

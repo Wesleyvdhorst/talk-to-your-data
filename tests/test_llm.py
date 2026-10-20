@@ -70,7 +70,7 @@ def test_generate_sql_sends_the_schema_and_the_question():
     client = sql_client("SELECT 1")
     generate_sql("how many orders?", "TABLE orders (99,441 rows)", client=client)
     (call,) = client.calls
-    assert "TABLE orders (99,441 rows)" in call["system"]
+    assert "TABLE orders (99,441 rows)" in call["system"][0]["text"]
     assert call["messages"] == [{"role": "user", "content": "how many orders?"}]
 
 
@@ -211,7 +211,7 @@ def test_clarify_returns_the_question_and_never_an_answer():
 def test_clarify_is_told_to_name_the_readings_and_pick_none():
     client = clarify_client("revenue or reviews?")
     clarify("best products?", "TABLE order_items", client=client)
-    system = client.calls[0]["system"]
+    system = client.calls[0]["system"][0]["text"]
     assert "TABLE order_items" in system  # only readings the schema supports
     assert "Do not pick one" in system
     assert "do not answer the question" in system
@@ -255,7 +255,7 @@ def test_a_response_without_an_assumption_raises_rather_than_defaulting():
 def test_the_sql_prompt_asks_for_the_choice_and_forbids_inventing_one():
     client = sql_client("SELECT 1")
     generate_sql("q", "SCHEMA", client=client)
-    system = client.calls[0]["system"]
+    system = client.calls[0]["system"][0]["text"]
     assert "would change the number if made differently" in system
     assert "do not manufacture a choice you did not make" in system
 
@@ -298,7 +298,7 @@ def test_history_goes_in_the_user_message_and_never_the_system_prompt():
     generate_sql("and in 2018?", "SCHEMA", client=client, history="EARLIER: 2017?")
     call = client.calls[0]
     assert "EARLIER: 2017?" in call["messages"][0]["content"]
-    assert "EARLIER: 2017?" not in call["system"]
+    assert "EARLIER: 2017?" not in call["system"][0]["text"]
     # The current question is labelled, so there is no doubt which to answer.
     assert "CURRENT QUESTION (write SQL for this one): and in 2018?" in (
         call["messages"][0]["content"]
@@ -316,4 +316,24 @@ def test_without_history_the_user_message_is_the_bare_question():
 def test_the_sql_prompt_forbids_reusing_an_earlier_number():
     client = sql_client("SELECT 1")
     generate_sql("q", "SCHEMA", client=client)
-    assert "never quote a number from an earlier turn" in client.calls[0]["system"]
+    assert "never quote a number from an earlier turn" in client.calls[0]["system"][0]["text"]
+
+
+# Prompt caching (milestone 13). Nothing caches unless asked, and the first
+# metered eval run read 0 tokens from cache across 21 questions.
+
+
+@pytest.mark.parametrize("call", ["sql", "clarify"])
+def test_the_stable_system_prompt_ends_in_a_cache_breakpoint(call):
+    """The breakpoint closes the system prompt - rules plus schema, the same
+    bytes every question - so the question after it never becomes part of
+    what is cached, and history (user message) cannot invalidate it."""
+    if call == "sql":
+        client = sql_client("SELECT 1")
+        generate_sql("q", "SCHEMA", client=client, history="EARLIER: 2017?")
+    else:
+        client = clarify_client("which?")
+        clarify("q", "SCHEMA", client=client)
+    (block,) = client.calls[0]["system"]
+    assert block["cache_control"] == {"type": "ephemeral"}
+    assert "SCHEMA" in block["text"]

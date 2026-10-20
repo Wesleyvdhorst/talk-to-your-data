@@ -12,7 +12,8 @@ best products?") gets a clarifying question instead of a silent choice.
 ## Running it
 
 **You need:** Python 3.14 via [`uv`](https://docs.astral.sh/uv/), an Anthropic
-API key, and the Olist CSVs. Costs about $0.01 per question.
+API key, and the Olist CSVs. Costs under a cent per question (measured:
+$0.007 for a typical answer with the prompt cache warm, $0.012 cold).
 
 **1. Install.**
 

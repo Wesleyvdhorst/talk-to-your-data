@@ -323,10 +323,15 @@ def as_markdown(results: list[Result]) -> str:
         f"**{passed}/{len(results)} questions correct.** "
         f"Classification {labels_ok}/{len(results)}; "
         f"values {values_ok}/{len(values)}. "
-        f"Total time {sum(r.seconds for r in results):.1f}s.",
+        f"Total time {sum(r.seconds for r in results):.1f}s. "
+        # Graded turns only, like the time: prior turns are setup. Cache
+        # reads are the number that says whether prompt caching is working.
+        f"Claude cost ${sum(r.answer.cost_usd for r in results):.4f}, "
+        f"{sum(u.cache_read for r in results for u in r.answer.usage):,} "
+        f"input tokens read from cache.",
         "",
-        "| # | Question | Covers | Verdict | Label | Expected | Got | Ended at | Why not |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| # | Question | Covers | Verdict | Label | Expected | Got | Ended at | Cost | Why not |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in results:
         label = r.label or "—"
@@ -335,7 +340,8 @@ def as_markdown(results: list[Result]) -> str:
         lines.append(
             f"| {r.question.id} | {r.question.question} | {r.question.covers} "
             f"| **{r.verdict}** | {label} | {_fmt(r.expected)} | {_fmt(r.actual)} "
-            f"| {r.answer.stage or 'answer'} | {r.why.replace('|', '/')} |"
+            f"| {r.answer.stage or 'answer'} | ${r.answer.cost_usd:.4f} "
+            f"| {r.why.replace('|', '/')} |"
         )
     lines += ["", "## What each question produced", ""]
     for r in results:
@@ -381,7 +387,9 @@ def main() -> None:
         "grading rules are in `eval_questions.md`. The recorded per-iteration "
         "runs this is measured against are archived in "
         "`eval_results_iteration3.md`, `eval_results_iteration2.md` and "
-        "`eval_results_iteration1.md`.\n\n"
+        "`eval_results_iteration1.md`; the cost before and after prompt "
+        "caching in `eval_results_m13_uncached.md` and "
+        "`eval_results_m13_cached.md`.\n\n"
         + as_markdown(results)
         + "\n"
     )
