@@ -486,3 +486,281 @@ written the first one.
 **Not fixed, on purpose.** The prompt stays as it is for now. The eval set
 exists to measure iteration 2 against this baseline, and tuning the prompt in
 the same breath as writing the eval would leave nothing to compare to.
+
+## Milestone 7 — classification before SQL
+
+**Attempted:** give the pipeline a way to decline. Two baseline defects had
+one cause: when the only available action is to generate SQL, every input gets
+SQL - including `asdfgh`, which came back as
+`SELECT 'your question looks like random keystrokes' AS message`.
+
+**The decision I made, and why it is not the obvious one:** the classifier is
+TypeSafe's Jev, not a third Claude call. Three labels, no generation and a
+calibrated confidence per label is the shape of a zero-shot decision model
+rather than of a chat model. $0.042/MTok on input with free output makes it
+roughly a hundredth of a Sonnet call, but at one call per question the money
+is not the argument - the argument is that `AMBIGUOUS` is better expressed as
+low confidence in a label than as a label a chat model elects to apply to
+itself. Claude flagged the honest cost (a second provider, a second key, a
+second failure mode, calibration not independently verified) and I took the
+tradeoff anyway, with the escape hatch that `classify()` is one module behind
+one contract.
+
+**A third outcome, which I had not planned for.** `Answer` held either an
+answer or an error, and a decline is neither: the pipeline understood the
+question well enough to refuse it. Adding `message`/`declined` alongside
+`error`/`ok` was the part of this milestone that actually changed the design,
+and the app now renders three states - a decline shown through `st.error`
+would read as a bug in the app rather than as a property of the question.
+
+**What failed, and it was my prompt again.** My first criteria labelled "how
+many orders were placed in 2030?" `UNSUPPORTED` at 0.98 confidence. That is
+eval question 12, the case where an empty result is the correct answer. My
+`UNSUPPORTED` text said "any period outside September 2016 to October 2018",
+which beat the more general "an answer of zero still belongs in ANSWERABLE" -
+two clauses in conflict, and the specific one won. The model was right about
+my wording. Same lesson as milestone 6: the defect was in what I wrote, and
+only running the real thing showed it.
+
+**Evidence against a knob I was tempted by.** Confidence is recorded but does
+not affect routing. After the criteria fix, the out-of-window questions land
+at 0.46-0.55 while the clear ones sit at 0.85-1.00 - so a sensible-looking
+0.7 threshold would have routed exactly the empty-result question to
+"ambiguous, please rephrase". Worth presenting: the calibration is informative
+*and* acting on it would have made the system worse.
+
+**Small thing learned about pinning.** `jev-latest` is an alias and the models
+endpoint publishes no concrete version, so "pin the model id" could not be
+done as planned. The version that answered (`jev-1.13.0` today) is recorded on
+every classification instead, so a recorded run can still say what labelled
+it.
+
+**New technique:** the Jev stub in `conftest.py` builds the SDK's own
+`SystemOneResponse`/`ChoiceAnswer` types instead of duck-typing them. If
+TypeSafe changes the shape of an answer, our offline tests fail rather than
+production.
+
+## Milestone 8 — asking back, and a trace that cannot lie
+
+**Attempted:** turn the AMBIGUOUS label into an actual question, and make the
+pipeline inspectable.
+
+**The division of labour I settled on.** Jev decides *that* a question is
+underspecified; a Claude call decides *what to ask about it*. The alternative
+I considered was a second fixed-taxonomy Jev question (metric / time range /
+entity undefined) templated into prose, which is cheaper and much worse: "By
+'best' do you mean highest revenue (sum of item price), most units sold (count
+of order items), or highest average review score?" names columns that exist,
+and a template cannot.
+
+**A setting I had claimed was impossible, now used.** The clarify call runs
+with `thinking={"type": "between_tools"}` - thinking off, which milestone 6
+discovered was available on this model after my own code comment said it was
+not. Verified on a real call before relying on it. Naming readings needs no
+reasoning, and a clarification that varies between runs is itself a kind of
+ambiguity.
+
+**The trace is derived, not recorded.** `Answer.trace` reads the fields the
+pipeline already set and reports the stages from them. My first instinct was
+to append to a list as the pipeline went, which is a second source of truth
+about the same run - and the failure mode of that design is a trace that
+claims a stage ran when it did not. Deriving it means the trace cannot
+disagree with the outcome.
+
+**The mistake I made while verifying, which is the thing worth presenting.** I
+saw an answer say an average was "based on 7,662 late orders" and a result
+with one column and one value, and concluded I had found a fresh grounding
+defect of exactly the kind milestone 6 was supposed to close. I even wrote a
+prompt rule forbidding it. I had compared an answer from one run against the
+result of *another* run: the generated SQL differs between runs, and on the
+runs that mention 7,662 the model's own query returns it as a second column.
+The claim was grounded the whole time.
+
+Two lessons. The first is about verification: with a non-deterministic
+pipeline, an answer and a result have to come from the *same* call, and
+printing them separately invites exactly this error. The second is about
+process: I had added a rule to the prompt before confirming the defect, and
+the rule actively made good answers worse - the model started tacking "the
+result also contains a column, late_orders_with_reviews, with a value of
+7,662" onto otherwise clean prose to satisfy it. It is reverted. No rule
+without evidence, including rules that look obviously safe.
+
+## Milestone 9 — grading the thing iteration 2 actually added
+
+**Attempted:** make the eval measure classification, not just values, and put
+the iteration 2 numbers next to the iteration 1 baseline.
+
+**The shape of the change.** Every question now has an `expected_label`, so
+the four that were record-only in iteration 1 are gradeable — there was no
+classifier then to be right or wrong about them. Six new questions, written
+before the run: two more `UNSUPPORTED` (no cost data, no demographics), two
+more `AMBIGUOUS`, one many-row grounding case, and one that is only answerable
+if the classifier knows the columns. Three independent checks: label, value,
+and (for the many-row case) row count. An `AMBIGUOUS` question also has to
+*ask* something — checked by looking for a question mark, because labelling a
+question ambiguous and then saying nothing useful is not a pass.
+
+**Result: 16/18.** Classification 17/18, values 9/10. The baseline was 8/8 on
+a set that could not grade the four questions this iteration is about, so the
+honest comparison is not 8/8 → 16/18; it is that the four questions which had
+no verdict now have one, and three of them pass.
+
+**The interesting failure, and I am not fixing it.** Question 8, "what is the
+average number of items per order?", is labelled `ANSWERABLE` at 0.98 and
+still returned 1.1328 where the reference says 1.1417 — the same split as
+iteration 1 (all 99,441 orders with zero-item orders counted as zero, versus
+the 98,666 orders that have items). So the defect iteration 2 was supposed to
+fix by asking never got asked about.
+
+That told me something I had not understood when I wrote the plan: the
+classifier catches **lexical** ambiguity — an undefined word like "best" or
+"perform" — and not **semantic** ambiguity, where the sentence reads precisely
+and the answer still depends on a modelling choice. Those are different
+problems. I could add "questions whose denominator is unstated" to the
+AMBIGUOUS criteria, and it would be wrong twice over: every average has a
+denominator choice, so the app would start interrogating reasonable questions;
+and I would be tuning the criteria against a question I had just measured,
+which is how an eval starts flattering the thing it measures. Recorded as the
+headline limitation instead, and it is the first item of iteration 3.
+
+**The other failure is a genuine margin.** "How are we doing recently?" came
+back `UNSUPPORTED` at 0.67 where I expected `AMBIGUOUS`. The data *can* answer
+it once a metric is chosen, so asking back serves the user better than
+declining — and 0.67 says the model found it close too. The criteria's
+"not a question about this data at all" clause and the undefined-metric clause
+genuinely overlap here. Fixable, but changing a classifier the eval already
+measures needs its own before/after run, so it belongs to iteration 3 rather
+than to a quiet edit inside this one.
+
+**Two settings settled by measurement rather than taste.** A confidence
+threshold is rejected: question 12, whose correct answer is zero, sits at
+0.40-0.55, *below* several questions that are genuinely harder, so any
+threshold misroutes exactly the case the set exists to protect. And thinking
+stays on for the answer call — `between_tools` earned its place in the
+clarification, where a question that varies between runs is itself a kind of
+ambiguity, but judging which caveats are real is the one place in the pipeline
+where reasoning is worth paying for.
+
+**The repair attempt was not built, and that is the result.** Zero validation
+failures, zero execution failures across 18 questions. The repair loop had a
+condition attached to it from the start, and the condition did not fire. It
+would have been easy to build it anyway and call the iteration more complete;
+what makes it a decision rather than laziness is that the trigger is written
+down — a recorded run that fails at `validate` or `execute`.
+
+
+## Milestone 10 — where vagueness ends and missing data begins
+
+*Iteration 3, first of three. Scope for the iteration was fixed before any
+code: this, the modelling assumption behind a number (11), and follow-up
+questions with bounded history (12). Review text and the agent loop are out.*
+
+- **Attempted.** Move "how are we doing recently?" from `UNSUPPORTED` (0.67)
+  to `AMBIGUOUS` by changing the classifier's criteria text and nothing else.
+  No code path, no new call, no new parameter — the only diff in `classify.py`
+  is inside two strings.
+- **Where AI helped.** Drafting the criteria wording, and pushing back that a
+  prompt change to the thing the eval measures only counts if it is recorded
+  as its own before/after run rather than argued for.
+- **What I decided.** Widen `AMBIGUOUS` to cover an undefined *period*, not
+  just an undefined metric, and make `UNSUPPORTED` say what it is actually
+  about: what the data **lacks**, not how loosely the question is worded. I
+  rejected thresholding confidence for the second time (question 12 still sits
+  low), and rejected relaxing question 8's reference so the remaining failure
+  would disappear — that reference is the only evidence the limitation exists.
+- **What failed.** The first widening was too wide: "how will we be doing next
+  quarter?" moved to `AMBIGUOUS` as well. A control test written alongside the
+  change caught it; re-reading the prompt had not, and would not have. The
+  criteria now carve forecasts out explicitly — the label is only ever for a
+  choice the *data* could make. Question 12 ("orders in 2030") is the case
+  that carve-out could have broken, and it still passes, which is the only
+  reason I trust the wording.
+- **Result.** 16/18 → 17/18, classification 17/18 → 18/18, question 16 from
+  0.67 `UNSUPPORTED` to 0.95 `AMBIGUOUS`, nothing else moved. Question 8 is
+  the only remaining failure.
+- **Learned.** A prompt change needs controls on the side you are *not* trying
+  to move. Without them you trade one misclassification for another and the
+  headline score hides the swap, because it only counts the net. Separately,
+  and measured rather than assumed: `LOAD fts` and `vss` are impossible on a
+  connection with `enable_external_access=false` (`Permission Error`, duckdb
+  1.5.6), and neither is even installed. That is what took full-text and
+  vector search over the reviews off the table — the remaining honest route
+  would have been embeddings in a plain column ranked with core
+  `list_cosine_similarity`, which is real work rather than a flag.
+
+## Milestone 11 — stating the choice behind the number
+
+- **Attempted.** Question 8 of the eval ("the average number of items per
+  order") reads precisely and still has two defensible answers, 1.1328 and
+  1.1417, depending on whether the 775 orders with no items count. The
+  classifier is right to call it ANSWERABLE, so the pipeline cannot ask. It
+  can say which denominator it used.
+- **What I decided.** Surface, do not detect. The alternative on the table was
+  generating the query under both readings and comparing — evidence rather
+  than a prompt rule, and genuinely the nicer idea — but it doubles the cost
+  of every answerable question and turns question 8 into a clarification,
+  which is a change to what the eval expects rather than to what the app gets
+  right. `assumption` is a second **required** field on the SQL call's output
+  schema: required, because optional would mean absent on the questions that
+  need it most.
+- **What I refused.** Relaxing question 8's reference so both readings pass.
+  That reference is the only evidence the limitation exists; a test changed to
+  make an implementation look right measures the implementation's opinion of
+  itself.
+- **What failed.** My integration test asserted that "how many orders are
+  there?" leaves nothing open. The model answered "counted every order
+  regardless of status (including canceled and unavailable ones)" — a real
+  choice, since 2,965 orders were never delivered. The premise was wrong, not
+  the output. I changed the assertion to the failure mode the field actually
+  invites: restating the SQL instead of naming the choice.
+- **Learned.** A field like this changes what the *tests* can claim. Nothing
+  branches on the assumption, no test asserts its wording, and three tests
+  assert only that it exists, stays a clause, and is not a paraphrase of the
+  query. That is the honest limit of testing prose.
+
+## Milestone 12 — follow-up questions, and the dead end iteration 2 shipped
+
+- **Attempted.** Iteration 2 could ask "revenue, units sold, or review score?"
+  and then had no way to hear the answer. One mechanism closes both halves: an
+  answered clarification *is* a follow-up turn.
+- **Where AI helped.** Drafting `history_block` and the chat rewrite of
+  `app.py`. The design decisions below are mine, and two of them are the only
+  interesting part of the milestone.
+- **Decision: history carries SQL, never rows.** `Turn(question, sql, asked)`
+  and nothing else. A follow-up re-derives its scope by querying again,
+  because every grounded claim in this app comes from a result its own query
+  produced. Pasting the previous rows into the prompt would have been less
+  code and would have quietly made the second answer evidence for nothing.
+- **Decision: history goes in the user message, not the system prompt.** Two
+  reasons that happen to agree. Prompt caching is a prefix match, so a
+  per-turn string in the system prompt would invalidate the ~1,070-token
+  schema context behind it on every question. And earlier turns are the user's
+  own text: in the system prompt they would carry operator authority, which is
+  how a question talks the rules out of a model. The rules stay above, the
+  conversation below, and a test asserts the placement rather than trusting it.
+- **Both caps, not one.** 3 turns *and* 2,000 characters, oldest dropped. I
+  wrote the turn cap first and then noticed three turns of 2,000-character SQL
+  is a different prompt from three of 300. An oversized single turn is dropped
+  rather than truncated — a cut-off query is worse than none, because the
+  model reads it as the shape to follow.
+- **What failed, twice.** The sidebar's turn counter and reset button lagged a
+  question behind: they were written before the new turn was appended.
+  `st.sidebar` is a container, so moving that block to the end of the script
+  fixed it. Then the full test suite started failing in `test_ingest.py` while
+  passing alone — my new UI tests were the first to actually open the app's
+  cached connection, and `st.cache_resource` is process-wide, so it stayed
+  open for the rest of the session. DuckDB refuses a second connection to the
+  same file with a different configuration, which is precisely what a test
+  using plain `duckdb.connect()` does. Released in the fixture teardown.
+- **The result, and what it does not mean.** 21/21, up from 16/18 at the end
+  of iteration 2. But question 8 passed this run and failed the previous one
+  with nothing changed in between: this run took the other denominator. That
+  is the semantic-ambiguity limitation doing exactly what it was recorded to
+  do, and the assumption line is what makes the flip visible instead of
+  mysterious. A single score cannot represent that question, which is why
+  every run is recorded in full.
+- **Learned.** "Write the eval questions before tuning against them" paid for
+  itself here: questions 19–21 and the grading note for 20 (label only, because
+  a reference value would grade which column the model chose to return rather
+  than whether the follow-up worked) were written before any of them had ever
+  run.

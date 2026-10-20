@@ -10,7 +10,16 @@ The point of this project is **process, learning and conceptual ownership** as m
 
 # Current status
 
-**Iteration 1 complete** (milestone 5, Evaluation & Baseline Stabilization, finished: 8/8 graded eval questions correct, limitations recorded in `README.md`). Next is iteration 2 (Robustness), driven by the defects in `docs/eval_results.md` and the dev notes. Update this line whenever a milestone is finished.
+**Iteration 3 complete** (milestones 10-12): the borderline classification,
+the modelling assumption behind a number, and follow-up questions with
+bounded history. **21/21** on the 21-question set (`docs/eval_results.md`,
+against the archived iteration 2 baseline) — but question 8 passed this run
+and failed the previous one unchanged, which is the semantic-ambiguity
+limitation rather than a fix. Review text and the bounded agent loop were
+deliberately **not** built; the reasons, including that DuckDB's `fts` and
+`vss` cannot load under `enable_external_access=false`, are in
+`docs/implementation_plan.md`. Update this line whenever a milestone is
+finished.
 
 Do not implement anything from a later step or iteration unless I ask for it explicitly.
 
