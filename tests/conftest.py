@@ -17,6 +17,29 @@ def fixture_db(tmp_path_factory) -> Path:
     return db_path
 
 
+# The assignment's minimum: these three tables and nothing else.
+MINIMUM_TABLES = ("orders", "order_reviews", "customers")
+
+
+@pytest.fixture(scope="session")
+def subset_db(tmp_path_factory) -> Path:
+    """A fixture database with only MINIMUM_TABLES loaded."""
+    from twyd.ingest import TABLES
+
+    data = tmp_path_factory.mktemp("subset_data")
+    for table in MINIMUM_TABLES:
+        (data / TABLES[table]).write_bytes((FIXTURE_DIR / TABLES[table]).read_bytes())
+    db_path = tmp_path_factory.mktemp("db") / "subset.duckdb"
+    ingest(data, db_path)
+    return db_path
+
+
+@pytest.fixture
+def subset_conn(subset_db):
+    with connect(subset_db) as c:
+        yield c
+
+
 @pytest.fixture
 def conn(fixture_db):
     with connect(fixture_db) as c:

@@ -35,6 +35,37 @@ def test_relationships_are_listed(conn):
     assert "one-to-MANY" in context  # the geolocation hazard
 
 
+def test_a_subset_gets_only_its_own_tables_relationships_and_rules(subset_conn):
+    """A relationship or rule naming a table that is not loaded invites SQL
+    that cannot bind, so neither is sent."""
+    context = schema_context(subset_conn)
+    assert "TABLE order_items" not in context
+    assert "orders.customer_id -> customers.customer_id" in context
+    assert "order_reviews.order_id -> orders.order_id" in context
+    for absent in ("order_items", "order_payments", "geolocation", "products"):
+        assert absent not in context, absent
+    assert "Joining orders to order_reviews duplicates" in context
+    assert "without reviews must still be" in context
+
+
+def test_a_lone_table_gets_no_empty_relationship_or_rule_sections(tmp_path):
+    from pathlib import Path
+
+    from twyd.db import connect
+    from twyd.ingest import ingest
+
+    data = tmp_path / "data"
+    data.mkdir()
+    name = TABLES["orders"]
+    (data / name).write_bytes((Path(__file__).parent / "fixtures" / name).read_bytes())
+    ingest(data, tmp_path / "t.duckdb")
+    with connect(tmp_path / "t.duckdb") as c:
+        context = schema_context(c)
+    assert "TABLE orders" in context
+    assert "RELATIONSHIPS" not in context
+    assert "JOIN RULES" not in context
+
+
 def test_context_is_small_enough_to_send(conn):
     """Small context is a rule, not an aspiration. ~2.5k tokens at 4 chars."""
     assert len(schema_context(conn)) < 10_000

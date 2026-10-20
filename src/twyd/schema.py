@@ -58,31 +58,84 @@ TABLE_NOTES = {
     ),
 }
 
-RELATIONSHIPS = """\
-orders.customer_id -> customers.customer_id (one-to-one, per order)
-order_items.order_id -> orders.order_id (many-to-one)
-order_payments.order_id -> orders.order_id (many-to-one)
-order_reviews.order_id -> orders.order_id (many-to-one)
-order_items.product_id -> products.product_id
-order_items.seller_id -> sellers.seller_id
-products.product_category_name -> product_category_translation.product_category_name
-customers.customer_zip_code_prefix / sellers.seller_zip_code_prefix \
--> geolocation.geolocation_zip_code_prefix (one-to-MANY)"""
+# Each line with the tables it names. A line is sent only when every one of
+# them was loaded: a join to a table that is not there is an invitation to
+# write SQL that cannot bind.
+RELATIONSHIPS = [
+    (("orders", "customers"), "orders.customer_id -> customers.customer_id (one-to-one, per order)"),
+    (("order_items", "orders"), "order_items.order_id -> orders.order_id (many-to-one)"),
+    (("order_payments", "orders"), "order_payments.order_id -> orders.order_id (many-to-one)"),
+    (("order_reviews", "orders"), "order_reviews.order_id -> orders.order_id (many-to-one)"),
+    (("order_items", "products"), "order_items.product_id -> products.product_id"),
+    (("order_items", "sellers"), "order_items.seller_id -> sellers.seller_id"),
+    (
+        ("products", "product_category_translation"),
+        "products.product_category_name -> product_category_translation.product_category_name",
+    ),
+    (
+        ("customers", "geolocation"),
+        "customers.customer_zip_code_prefix -> geolocation.geolocation_zip_code_prefix (one-to-MANY)",
+    ),
+    (
+        ("sellers", "geolocation"),
+        "sellers.seller_zip_code_prefix -> geolocation.geolocation_zip_code_prefix (one-to-MANY)",
+    ),
+]
 
-JOIN_RULES = """\
-- Joining orders to order_items, order_payments or order_reviews duplicates
-  order rows. Aggregate the child table first, or use COUNT(DISTINCT ...) on
-  purpose. Never AVG() across an inflated join.
-- Use LEFT JOIN when orders without items, payments or reviews must still be
-  counted; an inner join drops them silently.
-- Never join geolocation without aggregating it to one row per zip prefix."""
+# The child tables that inflate an order when joined to it, and how each one
+# is named in the rules below.
+_ORDER_CHILDREN = {
+    "order_items": "items",
+    "order_payments": "payments",
+    "order_reviews": "reviews",
+}
+
+
+def _or(items: list[str]) -> str:
+    """"a", "a or b", "a, b or c"."""
+    return " or ".join([", ".join(items[:-1]), items[-1]] if len(items) > 1 else items)
+
+
+def _join_rules(tables: set[str]) -> list[str]:
+    """The join rules that apply to the loaded tables, naming only those."""
+    rules = []
+    children = [t for t in _ORDER_CHILDREN if t in tables]
+    if "orders" in tables and children:
+        rules.append(
+            f"- Joining orders to {_or(children)} duplicates\n"
+            "  order rows. Aggregate the child table first, or use COUNT(DISTINCT ...) on\n"
+            "  purpose. Never AVG() across an inflated join."
+        )
+        rules.append(
+            f"- Use LEFT JOIN when orders without "
+            f"{_or([_ORDER_CHILDREN[t] for t in children])} must still be\n"
+            "  counted; an inner join drops them silently."
+        )
+    if "geolocation" in tables:
+        rules.append(
+            "- Never join geolocation without aggregating it to one row per zip prefix."
+        )
+    return rules
+
+
+def table_names(conn: duckdb.DuckDBPyConnection) -> list[str]:
+    """The tables this database holds, which may be any subset of the nine."""
+    return [
+        row[0]
+        for row in conn.sql(
+            "SELECT table_name FROM duckdb_tables() "
+            "WHERE internal = false AND schema_name = 'main' ORDER BY table_name"
+        ).fetchall()
+    ]
 
 
 def schema_context(conn: duckdb.DuckDBPyConnection) -> str:
     """Return the full schema description: columns, notes, relationships, rules.
 
-    All nine tables, every time. Selecting tables per question is an
-    optimisation with no observed problem to justify it yet.
+    Every loaded table, every time. Selecting tables per question is an
+    optimisation with no observed problem to justify it yet. Relationships and
+    join rules are filtered to the loaded tables; a section left empty by that
+    is left out.
     """
     columns = conn.sql(
         "SELECT table_name, column_name, data_type FROM duckdb_columns() "
@@ -105,13 +158,14 @@ def schema_context(conn: duckdb.DuckDBPyConnection) -> str:
             block += f"\n  NOTE: {note}"
         blocks.append(block)
 
-    return (
-        "\n\n".join(blocks)
-        + "\n\nRELATIONSHIPS\n"
-        + RELATIONSHIPS
-        + "\n\nJOIN RULES\n"
-        + JOIN_RULES
-    )
+    tables = set(by_table)
+    relationships = [line for names, line in RELATIONSHIPS if tables.issuperset(names)]
+    rules = _join_rules(tables)
+    if relationships:
+        blocks.append("RELATIONSHIPS\n" + "\n".join(relationships))
+    if rules:
+        blocks.append("JOIN RULES\n" + "\n".join(rules))
+    return "\n\n".join(blocks)
 
 
 def column_overview(conn: duckdb.DuckDBPyConnection) -> str:

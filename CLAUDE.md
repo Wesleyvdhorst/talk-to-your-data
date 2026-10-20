@@ -58,7 +58,7 @@ Each component is separate, has an explicit input/output contract and can be tes
 
 # Data
 
-- The raw CSVs are assumed to be already present in `data/`. They are **read-only**, are never committed (~120 MB) and obtaining them is a manual step outside the application.
+- The raw CSVs are **read-only** and never committed (~120 MB). `python -m twyd.ingest` reads `data/` if it holds any of them, else downloads the pinned Kaggle version via `kagglehub` into its cache and reads from there. Any subset of the nine tables loads; the schema context describes only the loaded ones.
 - All nine tables are ingested. `docs/data_model.md` records the measured grain, keys, null rates and cardinalities for each.
 
 Known semantic traps, every one verified against the real data — the numbers and the queries behind them are in `docs/data_model.md` and asserted in `tests/test_real_data.py`. Encode them in the schema context (milestone 2):
