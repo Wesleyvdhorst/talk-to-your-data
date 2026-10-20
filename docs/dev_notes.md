@@ -797,3 +797,32 @@ questions with bounded history (12). Review text and the agent loop are out.*
   (`cache_read_input_tokens`) is the only place it shows. And the minimum
   cacheable prefix on Sonnet 5.5 is 512 tokens, so a ~2,600-token schema
   prompt qualifies easily.
+
+## Milestone 14 — a chart from the shape of the result
+
+- **Attempted.** Draw a chart when a result has one, chosen by code from the
+  column types: time on x is a line, a short list of categories is a bar,
+  one number is no chart. "Deterministic before LLM" applied to presentation:
+  asking the model which chart to draw would be a call that can be wrong
+  about something the types already say.
+- **Decision: one measure at a time.** A selector rather than every numeric
+  column on one axis, because "orders per month" and "share late" together
+  flatten the share into a line along the bottom.
+- **What failed, and only the real run showed it.** Every offline test
+  passed, then clicking the example buttons against the real pipeline found
+  two defects. The default column was the first numeric one, which drew
+  `review_count` — the count that qualifies a category — instead of
+  `avg_review_score`, the thing asked about; both multi-measure examples put
+  the qualifier first, so the default is now the last (a habit of the
+  generated SQL, and recorded as one). And month strings sat on a category
+  axis, where a month with no orders (2016-11) silently vanishes and the line
+  looks unbroken; they are dates now, so the gap shows. Each got a test after
+  it was found.
+- **Where AI helped.** Writing `chart.py` and the tests, and checking
+  `st.bar_chart`'s signature on the installed version (`sort=False` exists in
+  1.66, so a ranked result keeps its order) instead of guessing.
+- **Learned.** Streamlit's `AppTest` can click the app's own example buttons
+  against the live pipeline and read back the Vega-Lite spec of each chart —
+  mark, axis type, sort — which made a real end-to-end check cheap (~$0.02)
+  and repeatable without a browser. It reads the spec, not the pixels, so a
+  look in the browser is still the last check.

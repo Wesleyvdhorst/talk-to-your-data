@@ -13,6 +13,7 @@ from pathlib import Path
 
 import streamlit as st
 
+from twyd.chart import chart_for, series
 from twyd.db import connect
 from twyd.pipeline import MAX_HISTORY_TURNS, answer_question
 
@@ -83,9 +84,13 @@ with st.sidebar:
 if "answers" not in st.session_state:
     st.session_state.answers = []
 
-def render(result) -> None:
+def render(result, turn: int) -> None:
     """Show one answered turn. No decisions: everything it branches on was
-    decided by the pipeline."""
+    decided by the pipeline, or by chart_for from the result's types.
+
+    `turn` is this turn's position in the transcript. It keys the one widget a
+    turn owns, so every turn's chart keeps its own choice of column across
+    reruns."""
     # st.text renders plain text. Everything below is either model output or a
     # database message, and both can quote review_comment_message - public free
     # text that in this dataset really does contain raw URLs. Rendered as
@@ -131,6 +136,23 @@ def render(result) -> None:
         with st.expander("SQL", expanded=not result.ok):
             st.code(result.sql, language="sql")
 
+    chart = result.result and chart_for(result.result.columns, result.result.rows)
+    if chart:
+        with st.expander("Chart", expanded=True):
+            # One column at a time: two measures on one axis flatten the
+            # smaller one. Defaults to the last numeric column (see Chart.ys).
+            y = chart.ys[0] if len(chart.ys) == 1 else st.selectbox(
+                "Plot", chart.ys, index=len(chart.ys) - 1, key=f"chart-y-{turn}"
+            )
+            data = series(result.result.columns, result.result.rows, chart.x, y)
+            if chart.kind == "line":
+                st.line_chart(data, x=chart.x, y=y)
+            else:
+                # sort=False keeps the query's ORDER BY: a "top 10" stays in
+                # rank order instead of being re-sorted alphabetically.
+                # Horizontal, because category labels here are long ids.
+                st.bar_chart(data, x=chart.x, y=y, sort=False, horizontal=True)
+
     if result.result is not None:
         with st.expander(f"Result ({result.result.row_count} rows)", expanded=True):
             if result.result.row_count:
@@ -149,11 +171,11 @@ def render(result) -> None:
                 st.warning("Showing the first rows only; the result was truncated.")
 
 
-for past in st.session_state.answers:
+for turn, past in enumerate(st.session_state.answers):
     with st.chat_message("user"):
         st.text(past.question)
     with st.chat_message("assistant"):
-        render(past)
+        render(past, turn)
 
 # An example button sets this and reruns; st.chat_input returns on submit.
 question = st.session_state.pop("pending", None) or st.chat_input(
@@ -173,7 +195,9 @@ if question:
                 # much of the past the model sees.
                 history=tuple(a.turn for a in st.session_state.answers),
             )
-        render(result)
+        # The index it is about to be appended at, so its chart keeps the
+        # same widget key when the loop above replays it on the next rerun.
+        render(result, len(st.session_state.answers))
     st.session_state.answers.append(result)
 
 # Written to the sidebar last, after this turn has been appended: st.sidebar is

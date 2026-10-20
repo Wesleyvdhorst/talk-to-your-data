@@ -3,6 +3,8 @@
 Ask a question in plain language. The app writes DuckDB SQL, validates it,
 runs it read-only against the Olist Brazilian e-commerce dataset, and explains
 the result from the rows it got back.
+When the rows have a time or category axis it also draws a chart, chosen
+from the column types rather than by the model.
 
 It answers, asks back, or declines — and says which. A question it cannot
 answer from the data ("what is our profit margin?") is refused rather than

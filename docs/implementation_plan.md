@@ -27,8 +27,8 @@ The assignment at `docs/requirements.txt` is authoritative. Work on **one milest
   purpose: the run produced zero validation and zero execution failures, so
   there is no observed limitation for it to fix. The condition for building it
   is a recorded run that fails at `validate` or `execute`.
-- **Extras, after iteration 3:** milestone 13 (cost and cache meter) done;
-  milestone 14 (auto chart) next. See the section at the end of the
+- **Extras, after iteration 3:** milestone 13 (cost and cache meter) and
+  milestone 14 (auto chart) done. See the section at the end of the
   iterations.
 
 Update this section upon completion of a milestone. Record implementation decisions in `docs/dev_notes.md`.
@@ -317,6 +317,27 @@ unasked. Measure first, then fix, then measure again:
 tokens per answered question, because its schema comes *after* the result
 rows in the user message. Moving it into a cached system block is a prompt
 change that could move answers, so it waits for a reason beyond cost.
+
+## Milestone 14 — a chart from the shape of the result (done)
+
+`chart.py`, pure and Streamlit-free: `chart_for(columns, rows)` returns a
+`Chart(kind, x, ys)` or None, decided by types alone. The first column is x;
+every all-numeric column after it is a candidate y. Time on x (a date, or a
+`YYYY-MM` / `YYYY-MM-DD` string) is a line; up to 50 categories is a bar;
+anything else, and any single-row result, gets no chart. `app.py` draws one y
+at a time with a selector, defaulting to the last numeric column.
+
+**Two things the real run corrected, not the tests:**
+- The default column. "First numeric" drew `review_count` - the column that
+  qualifies a category - instead of `avg_review_score`, the one asked about.
+  Both multi-measure examples put the qualifier first, so the default is now
+  the last. A habit of the generated SQL, recorded as such in `Chart`.
+- The axis. Month strings sat on a category axis, where a month with no
+  orders (2016-11) disappears and the line looks unbroken. `series()` turns
+  them into dates, so the axis is temporal and the gap shows.
+
+`st.bar_chart(sort=False)` keeps the query's ORDER BY - verified on
+Streamlit 1.66, so a "worst first" result stays worst first.
 
 ---
 

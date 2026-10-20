@@ -23,8 +23,9 @@ deliberately **not** built; the reasons, including that DuckDB's `fts` and
 **Extras:** milestone 13 (cost and cache meter) done — every answer reports
 its tokens and $, and switching prompt caching on (it had never been on) cut
 the eval run from $0.181 to $0.115 at 21/21; both runs archived as
-`docs/eval_results_m13_*.md`. Milestone 14 (auto chart) next. Update this line
-whenever a milestone is finished.
+`docs/eval_results_m13_*.md`. Milestone 14 (auto chart) done — a line or bar
+chart picked from the result's column types by `chart.py`, no model involved.
+Update this line whenever a milestone is finished.
 
 Do not implement anything from a later step or iteration unless I ask for it explicitly.
 
