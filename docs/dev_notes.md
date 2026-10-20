@@ -848,3 +848,41 @@ questions with bounded history (12). Review text and the agent loop are out.*
 - **Learned.** A pytest fixture with `params=["jev", "claude"]` turns one
   boundary suite into a comparison of two classifiers, and skips whichever
   has no key.
+
+## Fresh-clone review, and a data-setup detour that was reverted
+
+- **Attempted.** A review of the project as an outsider would run it: a fresh
+  clone of `main`, the README followed step by step, the full test suite and
+  both evals, plus a break-it probe of ten questions the eval does not ask.
+  Everything reproduced (231 offline, 58 integration, 21/21). Two defects
+  came out of the probe, and were fixed in #25.
+- **What failed, and what changed.** The answer call received every result
+  row, up to 1,000: "list every order id" cost $0.057, 8x a normal question,
+  and the prose quoted the prompt's `RESULT:` line back. It now sees 50 rows
+  with the true count stated ($0.0094). The first wording of that rule leaked
+  "you can see the first 50 in the table" to the user — the table shows all
+  1,000 — and was tightened. And the README claimed review text is never
+  read, but the SQL model reads it with `LIKE` on Portuguese keywords it picks
+  itself; the docs now say so.
+- **The detour.** Data setup as part of the app: any subset of the Olist
+  tables plus an automatic `kagglehub` download (#26, merged), then a measured
+  profile so that any CSVs would work (milestone B, built but never
+  committed). Both were scrapped — I judged the project good enough as it was
+  — and #26 was reverted by a PR (#27, `git revert -m 1`, no force-push).
+  #25 was kept.
+- **Worth keeping from the detour.** A plain-code profile of the data
+  rediscovered most hand-measured traps exactly (21 items and 29 payments per
+  order, 775/1/768 orders with none). Deciding "is this Olist's table?" by
+  table name was a bug: a toy dataset's `products.csv` got Olist's note and
+  lost the one fact that mattered, that its prices were text. And eval
+  question 8 turned out to hang on one phrase: with the SQL prompt saying
+  "an Olist e-commerce database" it averaged over orders with items in 9 of
+  10 runs, with a neutral phrase in 1 of 5.
+- **Where AI helped.** The outside review and the probe questions, checking
+  that `kagglehub` downloads public datasets without credentials before
+  choosing it, and comparing the branch against `develop` on the same
+  database to tell a real behaviour change from noise.
+- **Learned.** A fresh clone finds what a working checkout hides. A prompt
+  change that "only adds context" can still move an answer, so measure it
+  against the baseline before trusting the eval. And a merged PR is undone
+  most cleanly by another PR that reverts it.
