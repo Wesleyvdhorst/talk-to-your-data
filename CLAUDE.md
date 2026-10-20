@@ -12,8 +12,8 @@ The point of this project is **process, learning and conceptual ownership** as m
 
 **Iteration 3 complete** (milestones 10-12): the borderline classification,
 the modelling assumption behind a number, and follow-up questions with
-bounded history. **21/21** on the 21-question set (`docs/eval_results.md`,
-against the archived iteration 2 baseline) — but question 8 passed this run
+bounded history. **21/21** on the 21-question set (archived in
+`docs/eval_results_iteration3.md`, against the iteration 2 baseline) — but question 8 passed this run
 and failed the previous one unchanged, which is the semantic-ambiguity
 limitation rather than a fix. Review text and the bounded agent loop were
 deliberately **not** built; the reasons, including that DuckDB's `fts` and
@@ -138,7 +138,7 @@ uv run pytest                            # unit tests: offline, fixture data, fa
 uv run pytest -m integration             # integration tests: needs the real CSVs in data/
 uv run --env-file .env pytest -m integration   # ... plus real model calls (~$0.01 each)
 uv run --env-file .env streamlit run src/twyd/app.py   # the app (TWYD_DB overrides the db path)
-uv run python -c "from pathlib import Path; from twyd.ingest import ingest; print(ingest(Path('data'), Path('db/olist.duckdb')))"
+uv run python -m twyd.ingest             # build db/olist.duckdb from the CSVs in data/
 ```
 
 The DuckDB file is built at `db/olist.duckdb` and is gitignored. `data/` is
