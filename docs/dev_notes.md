@@ -886,3 +886,22 @@ questions with bounded history (12). Review text and the agent loop are out.*
   change that "only adds context" can still move an answer, so measure it
   against the baseline before trusting the eval. And a merged PR is undone
   most cleanly by another PR that reverts it.
+
+## End-of-project review
+
+- **Attempted.** A read-only review of every module, no tests run. No safety
+  holes; two real bugs and three stale comments, fixed in #33.
+- **What failed, and what changed.** The SQL validator parsed on DuckDB's
+  module-level default connection, which every thread shares and which is
+  not thread-safe; Streamlit runs each session in its own thread. The
+  cursor-per-run fix in `app.py` had covered running queries, not validating
+  them. It now parses on its own in-memory connection. And `Answer.turn` kept
+  SQL that had been rejected or had failed, which `history_block` then showed
+  to the next question as "Answered with SQL" — a follow-up would have built
+  on a broken query. It now keeps SQL only for a turn that succeeded.
+- **Decisions.** Fixed only the cheap, necessary items. Left as they are:
+  caching the answer call's schema (it moves documented cost figures), the
+  empty-question vs `"???"` inconsistency, and the chart's loose date pattern.
+- **Learned.** A comment that explains a decision goes stale when the
+  decision changes — three had. In a project meant to be explained from
+  memory, that is a defect, not cosmetics.
