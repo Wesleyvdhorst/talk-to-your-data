@@ -27,8 +27,16 @@ the eval run from $0.181 to $0.115 at 21/21; both runs archived as
 chart picked from the result's column types by `chart.py`, no model involved.
 Jev is optional: without `TYPESAFE_API_KEY` Claude classifies from the same
 criteria (21/21, $0.126, archived as `docs/eval_results_claude_classifier.md`;
-Jev re-run on the same criteria: 21/21, $0.110, `docs/eval_results.md`). The
-sidebar's examples are grouped by the path they exercise.
+Jev re-run after the answer-row cap: 21/21, $0.107, `docs/eval_results.md`).
+The sidebar's examples are grouped by the path they exercise.
+
+**Fresh-clone review** (#25): the answer call sees at most 50 result rows
+(`llm.ANSWER_ROWS`; a 1,000-row question went from $0.057 to $0.009), and the
+docs say how review text is really read (`LIKE` on keywords the model picks).
+Data setup as part of the app (any Olist subset, `kagglehub` download, a
+measured profile for any CSVs) was built and then dropped: #26 reverted by
+#27, the profile never committed. What it taught is in `docs/dev_notes.md`.
+The project is considered finished at this point.
 Update this line whenever a milestone is finished.
 
 Do not implement anything from a later step or iteration unless I ask for it explicitly.
