@@ -161,6 +161,19 @@ class _Client(Protocol):
     messages: Any
 
 
+def _cached(system: str) -> list[dict[str, Any]]:
+    """The system prompt as one block with a cache breakpoint at its end.
+
+    The rules and the schema context are identical on every question, so they
+    are the prefix worth caching; the question and the history come after the
+    breakpoint, in the user message. A breakpoint is needed at all because the
+    API caches nothing unasked - the first measured run (milestone 13) read 0
+    tokens from cache across 21 questions. Five-minute TTL: a reader asks the
+    next question well inside it, and the 1-hour write costs 2x, not 1.25x.
+    """
+    return [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+
+
 def _text(response: Any) -> str:
     """The first text block. Raises if the response has none, rather than
     returning an empty string that would look like a model with nothing to say.
@@ -217,7 +230,7 @@ def generate_sql(
         model=MODEL,
         max_tokens=MAX_TOKENS,
         output_config={"effort": SQL_EFFORT, "format": _SQL_FORMAT},
-        system=_SQL_SYSTEM.format(schema_context=schema_context),
+        system=_cached(_SQL_SYSTEM.format(schema_context=schema_context)),
         messages=[{"role": "user", "content": content}],
     )
     # The schema guarantees the shape, so a KeyError or JSONDecodeError here is
@@ -294,7 +307,7 @@ def clarify(question: str, schema_context: str, client: _Client | None = None) -
         max_tokens=CLARIFY_MAX_TOKENS,
         thinking=_NO_THINKING,
         output_config={"effort": CLARIFY_EFFORT, "format": _CLARIFY_FORMAT},
-        system=_CLARIFY_SYSTEM.format(schema_context=schema_context),
+        system=_cached(_CLARIFY_SYSTEM.format(schema_context=schema_context)),
         messages=[{"role": "user", "content": question}],
     )
     return json.loads(_text(response))["question"]

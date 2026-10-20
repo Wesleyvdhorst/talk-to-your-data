@@ -70,6 +70,12 @@ and whatever ran last in `eval_results.md`.
 - **Answer prose is graded by reading.** The row count behind an answer is
   checked deterministically (question 17), but whether a caveat is well judged
   is not something a test here asserts.
+- **The cost figure is list price, and Claude only.** `Answer.cost_usd` prices
+  `response.usage` at Sonnet 5.5's list prices, hard-coded in
+  `pipeline.PRICE_PER_MTOK`; nothing checks they still agree with the model
+  in `llm.py` or with the price list. Jev's classifier calls are not counted.
+  The answer call is not cached (its schema follows the result rows), so it
+  is now most of what a question costs.
 - **Single user, localhost.** The app binds to `127.0.0.1` and has no
   authentication or rate limiting. It holds two API keys, so do not serve it.
 - **Result size.** Queries are capped at 1,000 rows and 30 seconds; a

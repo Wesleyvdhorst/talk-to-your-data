@@ -12,7 +12,9 @@ import pytest
 from conftest import StubJev  # pytest puts tests/ on sys.path; it is not a package
 from twyd.pipeline import (
     MAX_HISTORY_CHARS,
+    Answer,
     Turn,
+    Usage,
     answer_question,
     history_block,
 )
@@ -24,10 +26,20 @@ class _Blocks:
         self.text = text
 
 
+class _Usage:
+    """What an uncached Claude call reports: the cache fields are None."""
+
+    input_tokens = 1000
+    output_tokens = 100
+    cache_creation_input_tokens = None
+    cache_read_input_tokens = None
+
+
 class _Response:
     def __init__(self, text):
         self.content = [_Blocks(text)]
         self.stop_reason = "end_turn"
+        self.usage = _Usage()
 
 
 class _Messages:
@@ -133,7 +145,7 @@ def test_the_answer_call_receives_the_same_schema_as_the_sql_call(conn, jev):
     answer_question("how many orders?", conn, client=client, jev=jev)
 
     sql_call, answer_call = client.messages.calls
-    assert "TABLE customers" in sql_call["system"]
+    assert "TABLE customers" in sql_call["system"][0]["text"]
     assert "TABLE customers" in answer_call["messages"][0]["content"]
     assert "RESULT: 1 row, 1 column (n), complete" in answer_call["messages"][0]["content"]
 
@@ -178,7 +190,7 @@ def test_the_clarification_call_gets_the_schema_so_it_offers_real_readings(conn)
     client = ClarifyingClient("by revenue or by units?")
     answer_question("best products?", conn, client=client, jev=StubJev("AMBIGUOUS"))
     call = client.messages.calls[0]
-    assert "TABLE order_items" in call["system"]
+    assert "TABLE order_items" in call["system"][0]["text"]
     # Thinking off: a clarification that varies run to run is itself ambiguous.
     assert call["thinking"] == {"type": "between_tools"}
     assert call["output_config"]["format"]["schema"]["required"] == ["question"]
@@ -223,6 +235,7 @@ def test_the_trace_of_an_answered_question_lists_every_stage(conn, jev):
         "validate",
         "run_query",
         "generate_answer",
+        "cost",
     ]
     assert "ANSWERABLE" in dict(result.trace)["classify"]
     assert dict(result.trace)["validate"] == "passed"
@@ -240,7 +253,7 @@ def test_the_trace_shows_a_clarification_as_its_own_stage(conn):
     client = ClarifyingClient("by revenue or by units?")
     result = answer_question("best products?", conn, client=client,
                              jev=StubJev("AMBIGUOUS"))
-    assert [stage for stage, _ in result.trace] == ["classify", "clarify"]
+    assert [stage for stage, _ in result.trace] == ["classify", "clarify", "cost"]
 
 
 def test_the_trace_records_a_rejection_rather_than_claiming_the_query_ran(conn, jev):
@@ -416,3 +429,41 @@ def test_an_unsupported_turn_claims_no_question_was_asked_back(conn):
     )
 
     assert result.turn == Turn(question="what will sales be?", sql=None, asked=None)
+
+
+# The meter (milestone 13): what each question's Claude calls used and cost.
+
+
+def test_every_claude_call_is_recorded_once(conn, jev):
+    client = ScriptedClient("SELECT count(*) AS n FROM orders")
+    result = answer_question("how many orders?", conn, client=client, jev=jev)
+    # SQL, then the answer. None for a cache field is recorded as 0.
+    assert result.usage == (Usage(1000, 100, 0, 0), Usage(1000, 100, 0, 0))
+
+
+def test_the_cost_is_priced_per_kind_of_token():
+    """Worked by hand at $2 in, $10 out, $2.50 cache write, $0.20 cache read."""
+    answer = Answer(question="q", usage=(Usage(1_000, 200, 4_000, 0),
+                                         Usage(500, 100, 0, 4_000)))
+    # 1,500 x 2 + 300 x 10 + 4,000 x 2.50 + 4,000 x 0.20, per million
+    assert answer.cost_usd == pytest.approx(0.0168)
+    assert dict(answer.trace)["cost"] == (
+        "2 calls, 1,500 in / 300 out, 4,000 cache read / 4,000 written, $0.0168"
+    )
+
+
+def test_a_question_declined_before_claude_costs_nothing(conn):
+    result = answer_question("what will sales be next month?", conn,
+                             client=ScriptedClient("SELECT 1"),
+                             jev=StubJev("UNSUPPORTED"))
+    assert result.usage == ()
+    assert result.cost_usd == 0
+    assert "cost" not in dict(result.trace)
+
+
+def test_a_rejected_query_still_reports_what_generating_it_cost(conn, jev):
+    """A failure is not free, and the record must not pretend it was."""
+    result = answer_question("delete everything", conn,
+                             client=ScriptedClient("DROP TABLE orders"), jev=jev)
+    assert result.stage == "validate"
+    assert len(result.usage) == 1

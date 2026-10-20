@@ -17,9 +17,15 @@ class _Block:
         self.type, self.text = "text", text
 
 
+class _Usage:
+    input_tokens, output_tokens = 1000, 100
+    cache_creation_input_tokens = cache_read_input_tokens = None
+
+
 class _Response:
     def __init__(self, text):
         self.content, self.stop_reason = [_Block(text)], "end_turn"
+        self.usage = _Usage()
 
 
 class _Messages:
@@ -162,6 +168,16 @@ def test_the_report_names_every_question(conn, jev):
     report = as_markdown(results)
     for q in QUESTIONS:
         assert q.question in report
+
+
+def test_the_report_records_what_the_run_cost_and_what_the_cache_served(conn, jev):
+    results = run_eval(conn, client=AlwaysClient("SELECT count(*) FROM orders"), jev=jev)
+    total = sum(r.answer.cost_usd for r in results)
+    assert total > 0
+    header = as_markdown(results).splitlines()[0]
+    assert f"Claude cost ${total:.4f}" in header
+    # The stub reports no cache fields, so the run read nothing from cache.
+    assert "0 input tokens read from cache" in header
 
 
 def test_a_prior_turn_is_asked_first_and_becomes_the_history(conn, jev):
