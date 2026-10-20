@@ -36,6 +36,10 @@ docs say how review text is really read (`LIKE` on keywords the model picks).
 Data setup as part of the app (any Olist subset, `kagglehub` download, a
 measured profile for any CSVs) was built and then dropped: #26 reverted by
 #27, the profile never committed. What it taught is in `docs/dev_notes.md`.
+
+**End-of-project review** (#33): the SQL validator parses on its own
+connection (the shared default is not thread-safe across Streamlit sessions),
+and SQL that was rejected or failed no longer reaches the next turn's history.
 The project is considered finished at this point.
 Update this line whenever a milestone is finished.
 
