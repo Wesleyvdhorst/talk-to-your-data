@@ -62,8 +62,12 @@ and whatever ran last in `eval_results.md`.
   deliberate: a summary is one more model call that can be wrong about what
   was asked, and persistence is a database this app does not need.
 - **No review-text understanding, and it is not coming in this app.**
-  `review_comment_message` is Portuguese and present on ~41% of reviews;
-  nothing reads it. Dropped from iteration 3 on cost, and the measurement
+  `review_comment_message` is Portuguese and present on ~41% of reviews, and
+  no component is built to read it. The SQL model still can: "what do
+  customers complain about most in their reviews?" is classified ANSWERABLE
+  and answered by `LIKE`-matching Portuguese keywords the model picked itself
+  ("não recebi: 1,571 reviews"). The assumption line names the keywords, but
+  the themes and counts are the model's choice, not a measurement. Dropped from iteration 3 on cost, and the measurement
   behind that is worth knowing: DuckDB's `fts` and `vss` extensions **cannot
   be loaded here at all** — `LOAD fts` on a connection with
   `enable_external_access=false` returns `Permission Error`, and neither is

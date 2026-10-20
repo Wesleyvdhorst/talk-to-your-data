@@ -93,7 +93,10 @@ Questions that work well are concrete and single-purpose:
 
 It will decline anything the data does not hold — costs, margins, customer
 demographics, stock, or the future — and ask back when a word like "best" has
-no agreed meaning. Review text is Portuguese and is not read at all.
+no agreed meaning. Review text is Portuguese and is not understood: ask what
+customers complain about and the SQL model matches Portuguese keywords it chose
+itself with `LIKE`. The assumption line says so; the counts are only as good as
+those keywords.
 
 ## Tests
 
