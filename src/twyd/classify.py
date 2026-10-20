@@ -56,8 +56,7 @@ _CRITERIA = {
     ANSWERABLE: (
         "A question with one clear reading that these tables can answer: "
         "counts, sums, averages, rankings, time trends or comparisons over "
-        "orders, order items, payments, reviews, products, sellers, customers "
-        "or Brazilian locations, between September 2016 and October 2018. A "
+        "the listed columns, between September 2016 and October 2018. A "
         "question whose true answer is 'none' or 'zero' still belongs here: a "
         "date filter that no row matches is answerable, and the answer is "
         "zero. A value that has to be COMPUTED from the listed columns also "

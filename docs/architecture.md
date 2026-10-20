@@ -42,7 +42,7 @@ oldest dropped, never summarised.
 
 | Module | Responsibility |
 |---|---|
-| `ingest.py` | CSVs → DuckDB, deterministic, no LLM |
+| `ingest.py` | CSVs → DuckDB, deterministic, no LLM. Any subset of the nine; downloads the pinned Kaggle version when `data/` is empty |
 | `db.py` | read-only connections, execution, row cap, timeout |
 | `schema.py` | the prompt's schema context: columns introspected, semantics hand-written |
 | `sql_guard.py` | treats generated SQL as untrusted; allowlist over the parse tree |
@@ -56,8 +56,9 @@ Safety is enforced twice, independently. The **engine** opens DuckDB with
 `read_only=True` and `enable_external_access=false` — the second matters,
 because on a plain read-only connection `COPY ... TO` writes a real file and
 `read_csv('/etc/passwd')` reads one. The **validator** then requires exactly
-one statement that parses as `SELECT`, references only the nine ingested
-tables, and calls no table functions. It is an allowlist over DuckDB's own
+one statement that parses as `SELECT`, references only the nine Olist table
+names (one that was not loaded then fails to bind in the engine), and calls no
+table functions. It is an allowlist over DuckDB's own
 parse tree, not a keyword blocklist, because `SELECT * FROM 'secrets.csv'`
 contains no suspicious keyword at all.
 
