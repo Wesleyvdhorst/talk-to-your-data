@@ -42,9 +42,13 @@ def test_the_app_renders_with_no_question_and_no_model_call(app):
     # The example buttons are the only affordance before a question is typed.
     # A literal, so adding an example means looking at this test: every one of
     # them is a claim that the question works, which only a real run can say.
-    assert len(app.button) == 11
+    assert len(app.button) == 24
     assert app.chat_input[0].value is None
-    assert [h.value for h in app.subheader] == ["One number", "Bigger questions"]
+    # One section per path through the pipeline, so each can be tried.
+    assert [e.label for e in app.expander] == [
+        "One number", "Bigger questions", "Asks back", "Declines",
+        "Follow-ups", "Edge cases",
+    ]
     # Nothing to replay yet, so no turn is rendered.
     assert not app.chat_message
 
@@ -216,3 +220,12 @@ def test_a_single_number_gets_no_chart(app, monkeypatch):
     app.chat_input[0].set_value("how many customers?").run()
     assert not app.exception
     assert len(_charts(app)) == 0
+
+
+def test_an_example_in_a_collapsed_section_is_still_asked_when_clicked(app, stub_pipeline):
+    """Sections other than the first start collapsed; a collapsed expander
+    still holds working buttons, and clicking one is the same as typing it."""
+    app.run()
+    [button] = [b for b in app.button if b.label == "What are the best products?"]
+    button.click().run()
+    assert stub_pipeline == [("What are the best products?", ())]
