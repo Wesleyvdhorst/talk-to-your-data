@@ -35,6 +35,11 @@ SQL_EFFORT = "medium"  # guesses until milestone 5 measures them
 ANSWER_EFFORT = "low"
 CLARIFY_EFFORT = "low"
 MAX_TOKENS = 1024
+# How many result rows the answer call sees. Two or three sentences cannot use
+# more, and the result can hold up to db.MAX_ROWS: "list every order id" sent
+# 1,000 rows and cost 8x a normal question. The true count still goes in the
+# RESULT line; the UI shows every row.
+ANSWER_ROWS = 50
 # A clarification is one question back to the user. Two sentences at the most,
 # so the cap is here to make a runaway visible rather than to pay for it.
 CLARIFY_MAX_TOKENS = 256
@@ -139,8 +144,10 @@ question. Two or three sentences, no preamble, no markdown headings.
 - Use only numbers that appear in the result. Never estimate, extrapolate or
   add context the result does not contain.
 - Every claim ABOUT the result - how many rows it has, which columns it has,
-  whether it is complete - must repeat the RESULT line. Do not count the rows
-  yourself and do not reason about what is missing from them.
+  whether it is complete - must agree with the RESULT line.
+  Do not count the rows yourself and do not reason about what is missing from
+  them. Say it in your own words: never quote the RESULT line or write the
+  word RESULT.
 - Mention the shape only when it matters to the answer: many rows, no rows, or
   a truncated result. For a single value, give the value and stop; do not
   recite the RESULT line back.
@@ -149,6 +156,9 @@ question. Two or three sentences, no preamble, no markdown headings.
   the query gave it rather than guessing what it identifies.
 - If the result is empty, say that nothing matched, and do not guess why.
 - If the result was truncated, say the answer covers the rows shown.
+- If only the first rows are listed, describe those and do not guess at the
+  rest. That limit is yours, not the reader's: they see every row in a table
+  next to your answer, so never mention how many rows were listed to you.
 - Mention a caveat only when the SQL makes one real: a filter that excludes
   rows, or a join that could duplicate them.
 - If an ASSUMPTION line is present, state that choice in a clause of its own.
@@ -272,13 +282,19 @@ def generate_answer(
     so the model is never asked to explain a choice that was not made.
     """
     client = client or anthropic.Anthropic()
-    result = {"columns": columns, "rows": [list(row) for row in rows]}
+    result = {"columns": columns, "rows": [list(row) for row in rows[:ANSWER_ROWS]]}
+    listed = (
+        f"; only the first {ANSWER_ROWS} are listed below"
+        if len(rows) > ANSWER_ROWS
+        else ""
+    )
     content = (
         f"Question: {question}\n\nSQL:\n{sql}\n\n"
         f"RESULT: {len(rows)} row{'' if len(rows) == 1 else 's'}, "
         f"{len(columns)} column{'' if len(columns) == 1 else 's'} "
         f"({', '.join(columns)}), "
         f"{'truncated at the row cap - more rows matched' if truncated else 'complete'}"
+        f"{listed}"
         f"\n{json.dumps(result, default=str)}"
     )
     if assumption:

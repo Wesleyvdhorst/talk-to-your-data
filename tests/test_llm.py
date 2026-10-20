@@ -11,6 +11,7 @@ import pytest
 
 from twyd.llm import (
     ANSWER_EFFORT,
+    ANSWER_ROWS,
     CLARIFY_EFFORT,
     CLARIFY_MAX_TOKENS,
     MODEL,
@@ -183,7 +184,7 @@ def test_the_answer_prompt_constrains_claims_about_the_result_not_only_numbers()
     client = StubClient([StubBlock("ok")])
     generate_answer("q", "SELECT 1", ["n"], [(1,)], client=client)
     system = client.calls[0]["system"]
-    assert "must repeat the RESULT line" in system
+    assert "must agree with the RESULT line" in system
     assert "Do not count the rows" in system  # wrapped in the prompt source
 
 
@@ -194,6 +195,25 @@ def test_the_prompt_does_not_invite_reciting_the_shape_of_a_single_value():
     generate_answer("q", "SELECT 1", ["n"], [(1,)], client=client)
     assert "do not" in client.calls[0]["system"]
     assert "recite the RESULT line back" in client.calls[0]["system"]
+
+
+def test_the_answer_call_sees_at_most_answer_rows_but_the_true_count():
+    """"List every order id" sent all 1,000 rows: 8x the cost of a normal
+    question, and the prose quoted the RESULT line back verbatim."""
+    client = StubClient([StubBlock("ok")])
+    rows = [(i,) for i in range(ANSWER_ROWS + 5)]
+    generate_answer("q", "SELECT 1", ["n"], rows, client=client)
+    content = client.calls[0]["messages"][0]["content"]
+    assert f"RESULT: {ANSWER_ROWS + 5} rows" in content
+    assert f"only the first {ANSWER_ROWS} are listed" in content
+    assert f"[{ANSWER_ROWS - 1}]" in content and f"[{ANSWER_ROWS}]" not in content
+    assert "never quote the RESULT line" in client.calls[0]["system"]
+
+
+def test_a_result_within_answer_rows_is_sent_whole_without_a_listed_note():
+    client = StubClient([StubBlock("ok")])
+    generate_answer("q", "SELECT 1", ["n"], [(i,) for i in range(ANSWER_ROWS)], client=client)
+    assert "only the first" not in client.calls[0]["messages"][0]["content"]
 
 
 def clarify_client(question: str) -> StubClient:
