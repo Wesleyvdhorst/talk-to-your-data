@@ -30,6 +30,10 @@ The assignment at `docs/requirements.txt` is authoritative. Work on **one milest
 - **Extras, after iteration 3:** milestone 13 (cost and cache meter) and
   milestone 14 (auto chart) done. See the section at the end of the
   iterations.
+- **Final touches:** Jev is optional — without a TypeSafe key Claude
+  classifies from the same criteria, and both classifiers pass 21/21 and the
+  37 boundary tests. The sidebar's examples are grouped by the path they
+  exercise (answer, ask back, decline, follow up, edge cases).
 
 Update this section upon completion of a milestone. Record implementation decisions in `docs/dev_notes.md`.
 

@@ -98,13 +98,15 @@ no agreed meaning. Review text is Portuguese and is not read at all.
 ## Tests
 
 ```bash
-uv run pytest                                   # 199 offline, no key needed
-uv run --env-file .env pytest -m integration    # 40 real-model tests, ~$0.35
+uv run pytest                                   # 231 offline, no key needed
+uv run --env-file .env pytest -m integration    # 58 real-model tests, ~$0.40
 ```
 
 Offline tests mock the model and run on tiny fixture CSVs. Integration tests
 make real calls and assert analytical meaning rather than SQL strings, since
-two correct queries for one question rarely look alike.
+two correct queries for one question rarely look alike. The classifier's
+boundary tests run once per classifier — Jev, and Claude as the fallback —
+skipping whichever has no key.
 
 ## Evaluation
 
@@ -112,18 +114,19 @@ A fixed question set, written before the first run, graded on classification
 and on value:
 
 ```bash
-uv run --env-file .env python -m twyd.eval      # 21 questions, ~$0.20
+uv run --env-file .env python -m twyd.eval      # 21 questions, ~$0.12
 ```
 
-**21/21 on the recorded iteration 3 run** (classification 21/21, values
-11/11), including the traps that make this dataset interesting: customers
+**21/21 with either classifier** (classification 21/21, values 11/11 —
+`eval_results.md` with Jev, `eval_results_claude_classifier.md` with Claude),
+including the traps that make this dataset interesting: customers
 counted as people rather than order rows, reviews aggregated per order before
 averaging, orders with no reviews found by anti-join, and lateness defined by
 timestamp rather than status.
 
-Read question 8 before believing the 21 — it passed that run and failed the
-one before it with nothing changed between them, which is why every run is
-recorded in full rather than reduced to a score.
+Read question 8 before believing the 21 — it passes in both of these runs,
+and has failed an earlier one with nothing changed in between, which is why
+every run is recorded in full rather than reduced to a score.
 
 ## Documentation
 
@@ -135,6 +138,7 @@ recorded in full rather than reduced to a score.
 | [`docs/eval_questions.md`](docs/eval_questions.md) | The question set and the grading rules |
 | [`docs/eval_results.md`](docs/eval_results.md) | The latest run, every generated query included (overwritten each run) |
 | `docs/eval_results_iteration{1,2,3}.md` | The frozen per-iteration runs |
+| [`docs/eval_results_claude_classifier.md`](docs/eval_results_claude_classifier.md) | The same set with Claude classifying (no TypeSafe key) |
 | [`docs/implementation_plan.md`](docs/implementation_plan.md) | The milestones, and what was deliberately not built |
 | [`docs/dev_notes.md`](docs/dev_notes.md) | Working notes: what broke, why, and what changed |
 

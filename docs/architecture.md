@@ -69,3 +69,9 @@ thinking, structured output for the SQL. About **$0.01 per question**.
 This model rejects `temperature`, forced `tool_choice` and assistant prefill
 with a 400 — all three being the usual ways to pin down text-to-SQL output —
 so the output schema does that work instead.
+
+Without a TypeSafe key the classification is a Claude call as well: the same
+model, effort `low`, the three labels as a structured-output enum, and the
+criteria in a cached system prompt — about $0.0005 a question. With the key,
+Jev (`jev-latest`, recorded per call as the concrete version) classifies and
+Claude is not asked.

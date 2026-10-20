@@ -26,7 +26,9 @@ the eval run from $0.181 to $0.115 at 21/21; both runs archived as
 `docs/eval_results_m13_*.md`. Milestone 14 (auto chart) done — a line or bar
 chart picked from the result's column types by `chart.py`, no model involved.
 Jev is optional: without `TYPESAFE_API_KEY` Claude classifies from the same
-criteria (21/21, $0.126, archived as `docs/eval_results_claude_classifier.md`).
+criteria (21/21, $0.126, archived as `docs/eval_results_claude_classifier.md`;
+Jev re-run on the same criteria: 21/21, $0.110, `docs/eval_results.md`). The
+sidebar's examples are grouped by the path they exercise.
 Update this line whenever a milestone is finished.
 
 Do not implement anything from a later step or iteration unless I ask for it explicitly.
