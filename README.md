@@ -25,7 +25,12 @@ uv sync
 
 **2. Get the data.** Download the
 [Olist Brazilian E-Commerce dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce)
-from Kaggle (~120 MB, not committed) and unzip all nine CSVs into `data/`:
+from Kaggle (~120 MB, not committed) and unzip all nine CSVs into `data/`.
+The folder is not in the repo, so create it first:
+
+```bash
+mkdir data
+```
 
 ```
 data/olist_customers_dataset.csv          data/olist_order_reviews_dataset.csv
