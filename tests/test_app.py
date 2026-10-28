@@ -229,3 +229,15 @@ def test_an_example_in_a_collapsed_section_is_still_asked_when_clicked(app, stub
     [button] = [b for b in app.button if b.label == "What are the best products?"]
     button.click().run()
     assert stub_pipeline == [("What are the best products?", ())]
+
+
+def test_the_chat_input_stays_after_an_example_is_clicked(app, stub_pipeline):
+    """Clicking an example that gets a clarifying question must leave a box to
+    answer it in. The input used to be skipped on the run that asked the
+    example, so the question back had nowhere to be answered."""
+    app.run()
+    [button] = [b for b in app.button if b.label == "What are the best products?"]
+    button.click().run()
+    assert len(app.chat_input) == 1
+    app.chat_input[0].set_value("by revenue").run()
+    assert [q for q, _ in stub_pipeline] == ["What are the best products?", "by revenue"]

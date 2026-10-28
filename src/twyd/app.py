@@ -231,9 +231,11 @@ for turn, past in enumerate(st.session_state.answers):
         render(past, turn)
 
 # An example button sets this and reruns; st.chat_input returns on submit.
-question = st.session_state.pop("pending", None) or st.chat_input(
-    "Ask a question, or follow up on the last answer"
-)
+# The input is drawn on every run, before the `or`: drawn after it, it was
+# skipped on the run that asked an example, leaving a clarifying question with
+# nowhere to type the answer.
+typed = st.chat_input("Ask a question, or follow up on the last answer")
+question = st.session_state.pop("pending", None) or typed
 
 if question:
     with st.chat_message("user"):
